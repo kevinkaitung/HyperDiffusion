@@ -141,3 +141,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# hyperINR experiments
+generated_weights_samples/
+
+# some data used in hyperDiffusion
+02691156_2048_pc/
+02691156_2048_pc.zip
+mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad
+mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad.zip

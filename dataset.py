@@ -241,3 +241,29 @@ class WeightDataset(Dataset):
 
     def __len__(self):
         return len(self.mlp_files)
+
+class EncodingWeightDataset(Dataset):
+    def __init__(
+        self, pretrained_weights_info, wandb_logger, model_dims, cfg
+    ):
+        self.encoding_weights = {k: pretrained_weights_info[k] for k in pretrained_weights_info.keys() if k.startswith('weights')}
+        self.n_params = pretrained_weights_info["tree.n_params"].item()
+        self.condition = cfg.transformer_config.params.condition
+        
+        # original approach would use data augmentation for training,
+        # maybe we can consider using it in the future
+        self.transform = None
+        
+        self.logger = wandb_logger
+        self.model_dims = model_dims
+        self.cfg = cfg
+
+    def __getitem__(self, index):
+        if index >= self.n_params:
+            # need to raise IndexError to avoid infinite loop
+            # when directly enumerating the dataset instead of using DataLoader
+            raise IndexError(f"Index {index} out of bounds (n_params={self.n_params})")
+        return self.encoding_weights[f"weights{index}"]
+
+    def __len__(self):
+        return self.n_params

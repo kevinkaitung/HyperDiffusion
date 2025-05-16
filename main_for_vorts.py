@@ -26,6 +26,7 @@ from transformer import Transformer
 sys.path.append("siren")
 
 from temp_exps_helper import calculate_encoder_n_parameters_by_level, calculate_mlp_n_parameters, chunk_encoder_dense_grid
+from temp_exps_helper import extract_weights_at_level
 
 @hydra.main(
     version_base=None,
@@ -83,8 +84,8 @@ def main(cfg: DictConfig):
         # )
         # assert n_params_mlp == pretrained_weights["model_state_dict"]["weights0"].shape[0]
         prev = pretrained_weights["model_state_dict"]
-        layers, layer_names, pretrained_weights["model_state_dict"] = chunk_encoder_dense_grid(model_config=pretrained_weights["model_state_dict"], chunk_size=7)
-        import pdb; pdb.set_trace()
+        layers, layer_names, pretrained_weights["model_state_dict"] = extract_weights_at_level(model_config=pretrained_weights["model_state_dict"], level=1, chunk_size=7)
+        # import pdb; pdb.set_trace()
         model = Transformer(
             layers, layer_names, **Config.config["transformer_config"]["params"]
         ).cuda()

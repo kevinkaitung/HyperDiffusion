@@ -181,3 +181,17 @@ def calculate_mlp_n_parameters(model_config: dict):
         names_by_layer.append(f"layer_{i}")
 
     return n_params_by_layer, names_by_layer, n_params_mlp
+
+def calculate_latent_weights_n_parameters(data_config: dict):
+    latent_space_num_chs = data_config["z_shape"][0]
+    latent_space_3D_dims = data_config["z_shape"][1:]
+    
+    n_params_by_layer = []
+    names_by_layer = []
+    
+    # Calculate the number of parameters in the latent space
+    for i in range(latent_space_num_chs):
+        n_params_by_layer.append(latent_space_3D_dims[0] * latent_space_3D_dims[1] * latent_space_3D_dims[2])
+        names_by_layer.append(f"channel_{i}")
+    
+    return n_params_by_layer, names_by_layer

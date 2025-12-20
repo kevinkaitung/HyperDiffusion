@@ -267,3 +267,25 @@ class EncodingWeightDataset(Dataset):
 
     def __len__(self):
         return self.n_params
+    
+class LatentEncodingWeightDataset(Dataset):
+    def __init__(
+        self, latent_weights, wandb_logger, model_dims, cfg
+    ):
+        self.latent_weights = latent_weights
+        self.n_params = latent_weights.shape[0]
+        self.condition = cfg.transformer_config.params.condition
+        
+        # original approach would use data augmentation for training,
+        # maybe we can consider using it in the future
+        self.transform = None
+        
+        self.logger = wandb_logger
+        self.model_dims = model_dims
+        self.cfg = cfg
+
+    def __getitem__(self, index):
+        return self.latent_weights[index].flatten()
+
+    def __len__(self):
+        return self.n_params

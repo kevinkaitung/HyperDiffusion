@@ -1,6 +1,6 @@
 import os
 
-from dataset import VoxelDataset, WeightDataset, EncodingWeightDataset
+from dataset import VoxelDataset, WeightDataset, EncodingWeightDataset, LatentEncodingWeightDataset
 from hd_utils import Config, get_mlp
 from hyperdiffusion_temp import HyperDiffusion
 
@@ -26,7 +26,7 @@ from transformer import Transformer
 sys.path.append("siren")
 
 from temp_exps_helper import calculate_encoder_n_parameters_by_level, calculate_mlp_n_parameters, chunk_encoder_dense_grid
-from temp_exps_helper import extract_weights_at_level
+from temp_exps_helper import extract_weights_at_level, calculate_latent_weights_n_parameters
 
 @hydra.main(
     version_base=None,
@@ -46,7 +46,7 @@ def main(cfg: DictConfig):
     #     mlp_kwargs = Config.config["mlp_config"]["params"]
 
     # load pre-trained weights
-    pretrained_weights = torch.load("/home/kctung/Projects/instant-vnr-pytorch/logs/hyperinr/debug/run00026/checkpoint-last.ckpt")
+    pretrained_weights = torch.load("/home/kctung/Projects/BlockFusion/logs/hashencoding_w_bigger_net/20250515-170738/weights_latent_space.pt")
 
     wandb.init(
         project="hyperdiffusion",
@@ -83,9 +83,8 @@ def main(cfg: DictConfig):
         #     model_config=pretrained_weights["model_state_dict"]
         # )
         # assert n_params_mlp == pretrained_weights["model_state_dict"]["weights0"].shape[0]
-        prev = pretrained_weights["model_state_dict"]
-        layers, layer_names, pretrained_weights["model_state_dict"] = extract_weights_at_level(model_config=pretrained_weights["model_state_dict"], level=1, chunk_size=7)
-        # import pdb; pdb.set_trace()
+        layers, layer_names = calculate_latent_weights_n_parameters(pretrained_weights)
+        import pdb; pdb.set_trace()
         model = Transformer(
             layers, layer_names, **Config.config["transformer_config"]["params"]
         ).cuda()
@@ -167,8 +166,8 @@ def main(cfg: DictConfig):
         # test_object_names = set([str.split(".")[0] for str in test_object_names])
         # # assert len(train_object_names) == train_size, f"{len(train_object_names)} {train_size}"
 
-        train_dt = EncodingWeightDataset(
-            pretrained_weights["model_state_dict"],
+        train_dt = LatentEncodingWeightDataset(
+            pretrained_weights["weights_latent_space"],
             wandb_logger,
             model.dims,
             cfg,

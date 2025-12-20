@@ -14,17 +14,18 @@ jitter_augment: False
 normalization_factor: 1
 timesteps: 500
 epochs: 6000
+# epochs: 2000
 scheduler: True
 scheduler_step: 200
 best_model_save_path:
 mode: train
 # mlps_folder_train: ./mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad
-mlps_folder_train: ../instant-vnr-pytorch/logs/hyperinr/debug/run00026
+mlps_folder_train: ../instant-vnr-pytorch/logs/hyperinr/debug/run00028
 model_resume_path:
-sampling: ddim
+sampling: ddpm
 val_fid_calculation_period: 15
 lr: 0.0002
-batch_size: 16
+batch_size: 256
 accumulate_grad_batches: 1
 val:
   num_points: 2048

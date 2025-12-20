@@ -150,3 +150,5 @@ generated_weights_samples/
 02691156_2048_pc.zip
 mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad
 mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad.zip
+
+*.pt

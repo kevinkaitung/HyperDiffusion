@@ -289,3 +289,50 @@ class LatentEncodingWeightDataset(Dataset):
 
     def __len__(self):
         return self.n_params
+    
+class SirenWeightDataset(Dataset):
+    def __init__(
+        self, siren_weights, wandb_logger, model_dims, cfg
+    ):
+        # receive the siren_weights as loaded_model['net_state_dict'],
+        # which has the keys and values
+        
+        # use the first instance to capture the layer keys of each module instance
+        # TODO: might need to check if there are no keys or no first instance etc.
+        layer_keys = set()
+        for k in siren_weights.keys():
+            if k.startswith('0.'):
+                layer_keys.add(k)
+        n_layer = len(layer_keys)
+        n_instances = int(len(siren_weights.keys()) / n_layer)
+        
+        # create a unified tensor for all instances    
+        # 2D (#instances, flatten weights for all layers)
+        self.siren_weights = []
+        counter = 0
+        temp = []
+        for k in siren_weights.keys():
+            temp.append(siren_weights[k].flatten())
+            counter += 1
+            if counter == n_layer:
+                self.siren_weights.append(torch.cat(temp, dim=0))
+                counter = 0
+                temp = []
+        self.siren_weights = torch.stack(self.siren_weights, dim=0)
+        
+        self.n_params = n_instances
+        self.condition = cfg.transformer_config.params.condition
+        
+        # original approach would use data augmentation for training,
+        # maybe we can consider using it in the future
+        self.transform = None
+        
+        self.logger = wandb_logger
+        self.model_dims = model_dims
+        self.cfg = cfg
+
+    def __getitem__(self, index):
+        return self.siren_weights[index].flatten()
+
+    def __len__(self):
+        return self.n_params

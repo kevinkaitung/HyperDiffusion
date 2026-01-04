@@ -195,3 +195,19 @@ def calculate_latent_weights_n_parameters(data_config: dict):
         names_by_layer.append(f"channel_{i}")
     
     return n_params_by_layer, names_by_layer
+
+def calculate_siren_weights_n_parameters(data_config: dict):
+    siren_weights_state_dict = data_config['net_state_dict']
+    
+    n_params_by_layer = []
+    names_by_layer = []
+    
+    # use the first instance to capture the layer keys of each module instance
+    # TODO: might need to check if there are no keys or no first instance etc.
+    
+    for k in siren_weights_state_dict.keys():
+        if k.startswith('0.'):
+            n_params_by_layer.append(siren_weights_state_dict[k].numel())
+            names_by_layer.append(k.split('.', 1)[1])
+            
+    return n_params_by_layer, names_by_layer

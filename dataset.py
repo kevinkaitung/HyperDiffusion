@@ -292,7 +292,7 @@ class LatentEncodingWeightDataset(Dataset):
     
 class SirenWeightDataset(Dataset):
     def __init__(
-        self, siren_weights, wandb_logger, model_dims, cfg
+        self, siren_weights, model_dims, cfg
     ):
         # receive the siren_weights as loaded_model['net_state_dict'],
         # which has the keys and values
@@ -327,7 +327,6 @@ class SirenWeightDataset(Dataset):
         # maybe we can consider using it in the future
         self.transform = None
         
-        self.logger = wandb_logger
         self.model_dims = model_dims
         self.cfg = cfg
 

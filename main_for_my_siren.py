@@ -1,6 +1,6 @@
 import os
 
-from dataset import VoxelDataset, WeightDataset, EncodingWeightDataset, LatentEncodingWeightDataset, SirenWeightDataset
+from dataset import SirenWeightDataset
 from hd_utils import Config, get_mlp
 from hyperdiffusion_temp import HyperDiffusion
 
@@ -16,17 +16,14 @@ import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader, random_split
 
-import ldm.ldm.modules.diffusionmodules.openaimodel
 import wandb
 from transformer import Transformer
 
 sys.path.append("siren")
 
-from temp_exps_helper import calculate_encoder_n_parameters_by_level, calculate_mlp_n_parameters, chunk_encoder_dense_grid
-from temp_exps_helper import extract_weights_at_level, calculate_latent_weights_n_parameters
 from temp_exps_helper import calculate_siren_weights_n_parameters
 
 @hydra.main(
@@ -49,18 +46,35 @@ def main(cfg: DictConfig):
     # load pre-trained weights
     loaded_model = torch.load(Config.get("siren_path"))
     
-    wandb.init(
-        project="hyperdiffusion",
-        dir=config["tensorboard_log_dir"],
-        settings=wandb.Settings(_disable_stats=True, _disable_meta=True),
-        tags=[Config.get("mode")],
-        mode="disabled" if Config.get("disable_wandb") else "online",
-        config=dict(config),
-    )
+    if Config.get("mode") == "train":
+        # create directory for saving logs
+        base_dir = "./logs"
+        os.makedirs(base_dir, exist_ok=True)
+        expname_dir = os.path.join(base_dir, Config.get("expname"))
+        os.makedirs(expname_dir, exist_ok=True)
+        run_dir = os.path.join(expname_dir, datetime.now().strftime("%Y%m%d-%H%M%S"))
+        os.makedirs(run_dir, exist_ok=True)
+        logging_file_md = 'w'
+    
+        # create tensorboard logger
+        tensorboard_writer = TensorBoardLogger(save_dir=run_dir)
+    elif Config.get("mode") == "test":
+        run_dir = Config.get("run_dir")
+        #TODO: double check if it's necessary to create tensorboard logger again for evaluation stage
+        tensorboard_writer = None
+    
+    # wandb.init(
+    #     project="hyperdiffusion",
+    #     dir=config["tensorboard_log_dir"],
+    #     settings=wandb.Settings(_disable_stats=True, _disable_meta=True),
+    #     tags=[Config.get("mode")],
+    #     mode="disabled" if Config.get("disable_wandb") else "online",
+    #     config=dict(config),
+    # )
 
-    wandb_logger = WandbLogger()
-    wandb_logger.log_text("config", ["config"], [[str(config)]])
-    print("wandb", wandb.run.name, wandb.run.id)
+    # wandb_logger = WandbLogger()
+    # wandb_logger.log_text("config", ["config"], [[str(config)]])
+    # print("wandb", wandb.run.name, wandb.run.id)
 
     train_dt = val_dt = test_dt = None
 
@@ -169,7 +183,6 @@ def main(cfg: DictConfig):
 
         train_dt = SirenWeightDataset(
             loaded_model["net_state_dict"],
-            wandb_logger,
             model.dims,
             cfg,
         )
@@ -242,15 +255,13 @@ def main(cfg: DictConfig):
 
     # Initialize HyperDiffusion
     diffuser = HyperDiffusion(
-        model, train_dt, val_dt, test_dt, mlp_kwargs, input_data.shape, method, cfg
+        model, train_dt, val_dt, test_dt, mlp_kwargs, input_data.shape, method, cfg, run_dir
     )
 
     # # Specify where to save checkpoints
-    checkpoint_path = join(
-        config["tensorboard_log_dir"],
-        "lightning_checkpoints",
-        f"{str(datetime.now()).replace(':', '-') + '-' + wandb.run.name + '-' + wandb.run.id}",
-    )
+    # just save under the exp directory
+    checkpoint_path = run_dir
+    
     # best_acc_checkpoint = ModelCheckpoint(
     #     save_top_k=1,
     #     monitor="val/1-NN-CD-acc",
@@ -275,9 +286,10 @@ def main(cfg: DictConfig):
     
     periodic_checkpoint = ModelCheckpoint(
         dirpath=checkpoint_path,
-        filename="periodic-{epoch:02d}-{train_loss:.2f}",
+        filename="periodic-{epoch:02d}-{train_loss:.7f}",
         save_top_k=-1,
-        every_n_epochs=2000,
+        save_last=True,
+        every_n_epochs=3000,
     )
 
     lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval="epoch")
@@ -287,7 +299,7 @@ def main(cfg: DictConfig):
         max_epochs=Config.get("epochs"),
         # strategy="ddp",
         strategy="dp",
-        logger=wandb_logger,
+        logger=tensorboard_writer,
         default_root_dir=checkpoint_path,
         callbacks=[
             periodic_checkpoint,
@@ -305,9 +317,8 @@ def main(cfg: DictConfig):
     trainer.test(
         diffuser,
         test_dl,
-        ckpt_path=best_model_save_path if Config.get("mode") == "test" else None,
+        ckpt_path=best_model_save_path if Config.get("mode") == "test" else periodic_checkpoint.last_model_path,
     )
-    wandb_logger.finalize("Success")
 
 
 if __name__ == "__main__":

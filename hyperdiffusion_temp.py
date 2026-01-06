@@ -22,7 +22,7 @@ from siren.experiment_scripts.test_sdf import SDFDecoder
 
 class HyperDiffusion(pl.LightningModule):
     def __init__(
-        self, model, train_dt, val_dt, test_dt, mlp_kwargs, image_shape, method, cfg
+        self, model, train_dt, val_dt, test_dt, mlp_kwargs, image_shape, method, cfg, run_dir
     ):
         super().__init__()
         self.model = model
@@ -33,6 +33,7 @@ class HyperDiffusion(pl.LightningModule):
         self.train_dt = train_dt
         self.test_dt = test_dt
         self.ae_model = None
+        self.run_dir = run_dir
         self.sample_count = min(
             8, Config.get("batch_size")
         )  # it shouldn't be more than 36 limited by batch_size
@@ -747,8 +748,8 @@ class HyperDiffusion(pl.LightningModule):
             out_pc_imgs = []
             
             # Save generated weights samples to disk
-            save_dir = f"generated_weights_samples/{wandb.run.name}"
-            os.makedirs(save_dir, exist_ok=True)
+            save_dir = self.run_dir
+            # os.makedirs(save_dir, exist_ok=True)
             torch.save({"generated_weights_samples": x_0s}, f"{save_dir}/generated_weights_samples.pt")
             
             

@@ -292,7 +292,7 @@ class LatentEncodingWeightDataset(Dataset):
     
 class SirenWeightDataset(Dataset):
     def __init__(
-        self, siren_weights, model_dims, cfg
+        self, siren_weights, light_dirs, model_dims, cfg
     ):
         # receive the siren_weights as loaded_model['net_state_dict'],
         # which has the keys and values
@@ -302,23 +302,24 @@ class SirenWeightDataset(Dataset):
         layer_keys = set()
         for k in siren_weights.keys():
             if k.startswith('0.'):
-                layer_keys.add(k)
+                idx_str, layer_name = k.split(".", 1)
+                layer_keys.add(layer_name)
         n_layer = len(layer_keys)
         n_instances = int(len(siren_weights.keys()) / n_layer)
         
         # create a unified tensor for all instances    
         # 2D (#instances, flatten weights for all layers)
         self.siren_weights = []
+        self.light_dirs = torch.tensor(light_dirs).cuda()
         counter = 0
         temp = []
-        for k in siren_weights.keys():
-            temp.append(siren_weights[k].flatten())
-            counter += 1
-            if counter == n_layer:
-                self.siren_weights.append(torch.cat(temp, dim=0))
-                counter = 0
-                temp = []
+        for idx in range(n_instances):
+            for layer_key in layer_keys:
+                temp.append(siren_weights[f"{idx}.{layer_key}"].flatten())
+            self.siren_weights.append(torch.cat(temp, dim=0))
+            temp = []
         self.siren_weights = torch.stack(self.siren_weights, dim=0)
+        
         
         self.n_params = n_instances
         self.condition = cfg.transformer_config.params.condition
@@ -331,7 +332,10 @@ class SirenWeightDataset(Dataset):
         self.cfg = cfg
 
     def __getitem__(self, index):
-        return self.siren_weights[index].flatten()
+        return self.siren_weights[index].flatten(), self.light_dirs[index]
 
     def __len__(self):
         return self.n_params
+    
+    def get_all_light_dirs(self):
+        return self.light_dirs

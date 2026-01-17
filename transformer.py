@@ -472,6 +472,11 @@ class Transformer(nn.Module):
         scalar_token_size = [self.get_scalar_token_size(num_frequencies)]
         input_parameter_sizes.extend([scalar_token_size])
         input_parameter_names.extend(["timestep_embedding"])
+        # HACK/TODO: might need to give light different embedding other than the same as timestep
+        # NOTE: temporarily disable light conditioning
+        # scalar_token_size_light = [self.get_scalar_token_size(num_frequencies) * 3]
+        # input_parameter_sizes.extend([scalar_token_size_light])
+        # input_parameter_names.extend(["light_dir_embedding"])
         return input_parameter_sizes, output_parameter_sizes, input_parameter_names
 
     def configure_optimizers(self, lr, wd, betas):
@@ -492,7 +497,7 @@ class Transformer(nn.Module):
         total_norm = total_norm**0.5
         return total_norm
 
-    def forward(self, x, t, x_prev=None):
+    def forward(self, x, t, light_dirs, x_prev=None):
         """
         Full G.pt forward pass.
         ----------------------------------------------
@@ -501,6 +506,7 @@ class Transformer(nn.Module):
         ----------------------------------------------
         x: (N, D) tensor of noised updated parameters
         t: (N, 1) tensor indicating the diffusion timestep
+        light_dirs: (N, 3) tensor of light directions (cartesian coordinates)
         loss_target: (N, 1) tensor, the prompted (desired) loss/error/return
         loss_prev: (N, 1) tensor, loss/error/return obtained by x_prev
         x_prev: (N, D) tensor of starting parameters that are being updated
@@ -509,12 +515,15 @@ class Transformer(nn.Module):
         ----------------------------------------------
         """
         t_embedding = self.scalar_embedder(t)
+        light_embedding = self.scalar_embedder(light_dirs)
         # loss_embedding = self.embed_loss(loss_target, loss_prev)
         if self.use_global_residual:
             x_prev = x_prev.unsqueeze(0).repeat((len(x), 1))
             assert x.shape == x_prev.shape
+            # inp = [x, x_prev, t_embedding, light_embedding]
             inp = [x, x_prev, t_embedding]
         else:
+            # inp = [x, t_embedding, light_embedding]
             inp = [x, t_embedding]
         inp = torch.cat(inp, 1)
         output = self.decoder(inp)

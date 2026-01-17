@@ -54,7 +54,7 @@ class HyperDiffusion(pl.LightningModule):
             diff_pl_module=self,
         )
 
-    def forward(self, images):
+    def forward(self, images, light_dirs):
         t = (
             torch.randint(0, high=self.diff.num_timesteps, size=(images.shape[0],))
             .long()
@@ -64,7 +64,7 @@ class HyperDiffusion(pl.LightningModule):
         x_t, e = self.diff.q_sample(images, t)
         x_t = x_t.float()
         e = e.float()
-        return self.model(x_t, t), e
+        return self.model(x_t, t, light_dirs), e
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=Config.get("lr"))
@@ -117,7 +117,8 @@ class HyperDiffusion(pl.LightningModule):
             #         level=0.5 if self.mlp_kwargs.output_type == "occ" else 0,
             #     )
 
-            print("Input images shape:", input_data.shape)
+            print("Input images shape:", input_data[0].shape)
+            print("Lighting directions shape:", input_data[1].shape)
         # elif self.method == "raw_3d" and self.trainer.global_step == 0:
         #     if self.cfg.mlp_config.params.move:
         #         out_imgs = []
@@ -146,33 +147,42 @@ class HyperDiffusion(pl.LightningModule):
 
         # Output statistics every 100 step
         if self.trainer.global_step % 100 == 0:
-            print(input_data.shape)
+            print(input_data[0].shape)
             print(
                 "Orig weights[0].stats",
-                input_data.min().item(),
-                input_data.max().item(),
-                input_data.mean().item(),
-                input_data.std().item(),
+                input_data[0].min().item(),
+                input_data[0].max().item(),
+                input_data[0].mean().item(),
+                input_data[0].std().item(),
             )
 
         # Sample a diffusion timestep
         t = (
-            torch.randint(0, high=self.diff.num_timesteps, size=(input_data.shape[0],))
+            torch.randint(0, high=self.diff.num_timesteps, size=(input_data[0].shape[0],))
             .long()
             .to(self.device)
         )
-
+        # pass conditioning via model_kwargs (not mlp_kwargs)
+        model_kwargs = {
+            "light_dirs": input_data[1]
+        }
         # Execute a diffusion forward pass
         loss_terms = self.diff.training_losses(
             self.model,
-            input_data * self.cfg.normalization_factor,
+            input_data[0] * self.cfg.normalization_factor,
             t,
             self.mlp_kwargs,
             self.logger,
-            model_kwargs=None,
+            model_kwargs=model_kwargs,
         )
         loss_mse = loss_terms["loss"].mean()
         self.log("train_loss", loss_mse)
+        
+        # Output cosine similarity every 100 step
+        if self.trainer.global_step % 100 == 0:
+            print("cosine similarity between predicted weights and original weights: ", loss_terms["cos_sim_mean"].mean())
+        self.log("cosine_similarity", loss_terms["cos_sim_mean"].mean())
+
 
         loss = loss_mse
         return loss
@@ -710,7 +720,7 @@ class HyperDiffusion(pl.LightningModule):
     #     # If it's HyperDiffusion, let's calculate some statistics on training dataset
     #     elif self.method == "hyper_3d":
             x_0s = []
-            for i, img in enumerate(self.train_dt):
+            for i, (img, light_dir) in enumerate(self.train_dt):
                 x_0s.append(img)
             x_0s = torch.stack(x_0s).to(self.device)
             flat = x_0s.view(len(x_0s), -1)
@@ -732,10 +742,30 @@ class HyperDiffusion(pl.LightningModule):
             )  # 0.538 is the variance of ImageNet pixels scaled to [-1, 1]
             print(f"Standard Deviation: {stdev}")
             print(f"OpenAI Coefficient: {oai_coeff}")
+            # randomly pick 16 train set light dirs and inference them
+            train_set_light_dirs = self.train_dt.get_all_light_dirs()
+            idx = torch.randperm(train_set_light_dirs.shape[0])[:16]
+            selected_light_dirs = train_set_light_dirs[idx]
+            model_kwargs = {
+                "light_dirs": selected_light_dirs
+            }
             # Then, sampling some new shapes -> outputting and rendering them
             x_0s = self.diff.ddim_sample_loop(
-                self.model, (16, *self.image_size[1:]), clip_denoised=False
+                self.model, (16, *self.image_size[1:]), clip_denoised=False, model_kwargs=model_kwargs
             )
+            ### section to destandardize
+            if self.train_dt.standardize:
+                token_means = self.train_dt.token_means
+                token_stds = self.train_dt.token_stds
+                token_offsets = self.train_dt.token_offsets
+                idx = 0
+                for token_mean, token_std in zip(token_means, token_stds):
+                    start = token_offsets[idx]
+                    end = token_offsets[idx + 1]
+                    x_0s[:, start:end] = x_0s[:, start:end] * (token_std + 0.0000000001) + token_mean
+
+                    idx += 1
+            ### end section
             x_0s = x_0s / self.cfg.normalization_factor
 
             print(
@@ -750,7 +780,7 @@ class HyperDiffusion(pl.LightningModule):
             # Save generated weights samples to disk
             save_dir = self.run_dir
             # os.makedirs(save_dir, exist_ok=True)
-            torch.save({"generated_weights_samples": x_0s}, f"{save_dir}/generated_weights_samples.pt")
+            torch.save({"generated_weights_samples": x_0s, "light_dir_cartesian": selected_light_dirs.tolist()}, f"{save_dir}/generated_weights_samples.pt")
             
             
     #         # Handle 4D generation

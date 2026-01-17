@@ -292,7 +292,7 @@ class LatentEncodingWeightDataset(Dataset):
     
 class SirenWeightDataset(Dataset):
     def __init__(
-        self, siren_weights, light_dirs, model_dims, cfg
+        self, siren_weights, light_dirs, model_dims, cfg, standardize=False
     ):
         # receive the siren_weights as loaded_model['net_state_dict'],
         # which has the keys and values
@@ -300,10 +300,15 @@ class SirenWeightDataset(Dataset):
         # use the first instance to capture the layer keys of each module instance
         # TODO: might need to check if there are no keys or no first instance etc.
         layer_keys = set()
+        token_offsets = []
+        offset = 0
         for k in siren_weights.keys():
             if k.startswith('0.'):
                 idx_str, layer_name = k.split(".", 1)
                 layer_keys.add(layer_name)
+                token_offsets.append(offset)
+                offset += siren_weights[k].numel()
+        token_offsets.append(offset)
         n_layer = len(layer_keys)
         n_instances = int(len(siren_weights.keys()) / n_layer)
         
@@ -311,7 +316,7 @@ class SirenWeightDataset(Dataset):
         # 2D (#instances, flatten weights for all layers)
         self.siren_weights = []
         self.light_dirs = torch.tensor(light_dirs).cuda()
-        counter = 0
+        
         temp = []
         for idx in range(n_instances):
             for layer_key in layer_keys:
@@ -320,6 +325,27 @@ class SirenWeightDataset(Dataset):
             temp = []
         self.siren_weights = torch.stack(self.siren_weights, dim=0)
         
+        # statistics before any standardization
+        self.std = self.siren_weights.std()
+        self.mean = self.siren_weights.mean()
+        
+        token_means = []
+        token_stds = []
+        # calculate per-token statistic
+        # and standardize siren weights tokens
+        for idx in range(len(token_offsets) - 1):
+            start = token_offsets[idx]
+            end = token_offsets[idx + 1]
+            this_token = self.siren_weights[:, start:end]
+            token_means.append(this_token.mean())
+            token_stds.append(this_token.std())
+            if standardize:
+                self.siren_weights[:, start:end] = (this_token - this_token.mean()) / (this_token.std() + 0.0000000001)
+        
+        self.standardize = standardize
+        self.token_means = token_means
+        self.token_stds = token_stds
+        self.token_offsets = token_offsets
         
         self.n_params = n_instances
         self.condition = cfg.transformer_config.params.condition

@@ -183,14 +183,18 @@ def main(cfg: DictConfig):
 
         train_dt = SirenWeightDataset(
             loaded_model["net_state_dict"],
+            loaded_model["light_dir_cartesian"],
             model.dims,
             cfg,
+            standardize=False
         )
         train_dl = DataLoader(
             train_dt,
             batch_size=Config.get("batch_size"),
             shuffle=True,
         )
+        # normalize with std of all siren weights (just for experiment)
+        # cfg.normalization_factor = (1.0 / (train_dt.std)).item()
         # val_dt = WeightDataset(
         #     mlps_folder_train,
         #     wandb_logger,
@@ -237,25 +241,22 @@ def main(cfg: DictConfig):
             len(train_dt)
         )
     )
-    # input_data = next(iter(train_dl))[0]
-    # when accessing their dataset, 
-    # it would return a tuple of three elements (weights, prev_weigts, ...)
-    # but mine would return a single element (weights)
-    # so no need [0] in my case
+    # dataloader would return a tuple of 2 elements (weights, light directions)
     input_data = next(iter(train_dl))
     print(
         "Input data shape, min, max:",
-        input_data.shape,
-        input_data.min(),
-        input_data.max(),
+        input_data[0].shape,
+        input_data[0].min(),
+        input_data[0].max(),
     )
+    print(f"Light Direction: {input_data[1]}")
 
     best_model_save_path = Config.get("best_model_save_path")
     model_resume_path = Config.get("model_resume_path")
 
     # Initialize HyperDiffusion
     diffuser = HyperDiffusion(
-        model, train_dt, val_dt, test_dt, mlp_kwargs, input_data.shape, method, cfg, run_dir
+        model, train_dt, val_dt, test_dt, mlp_kwargs, input_data[0].shape, method, cfg, run_dir
     )
 
     # # Specify where to save checkpoints

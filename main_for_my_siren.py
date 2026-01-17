@@ -47,19 +47,14 @@ def main(cfg: DictConfig):
     loaded_model = torch.load(Config.get("siren_path"))
     
     if Config.get("mode") == "train":
-        # create directory for saving logs
-        base_dir = "./logs"
-        os.makedirs(base_dir, exist_ok=True)
-        expname_dir = os.path.join(base_dir, Config.get("expname"))
-        os.makedirs(expname_dir, exist_ok=True)
-        run_dir = os.path.join(expname_dir, datetime.now().strftime("%Y%m%d-%H%M%S"))
-        os.makedirs(run_dir, exist_ok=True)
-        logging_file_md = 'w'
-    
+        # get the hydra log directory
+        run_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
         # create tensorboard logger
         tensorboard_writer = TensorBoardLogger(save_dir=run_dir)
     elif Config.get("mode") == "test":
-        run_dir = Config.get("run_dir")
+        run_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+        # NOTE: for testing ckpt generated before refactoring the code
+        # run_dir = config.run_dir
         #TODO: double check if it's necessary to create tensorboard logger again for evaluation stage
         tensorboard_writer = None
     

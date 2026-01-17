@@ -1,3 +1,7 @@
+expname: siren_diffusion
+hydra:
+  run:
+    dir: logs/${expname}/${now:%Y-%m-%d_%H-%M-%S}
 method: hyper_3d
 calculate_metric_on_test: True
 dedup: False
@@ -20,8 +24,7 @@ scheduler_step: 200
 best_model_save_path:
 mode: train
 siren_path: /home/kctung/Projects/BlockFusion/logs/SIREN_overfitting_mechhand/20260102-184949/pure_siren_model_permuted.pt
-expname: siren_diffusion
-run_dir: 
+# run_dir: # only need for ckpt generated before refactoring log organization
 # mlps_folder_train: ./mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad
 mlps_folder_train: ../instant-vnr-pytorch/logs/hyperinr/debug/run00028
 model_resume_path:

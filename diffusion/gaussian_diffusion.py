@@ -820,6 +820,15 @@ class GaussianDiffusion:
             # mlp = MLP(**mlp_kwargs)
             terms["mse"] = mean_flat((target - model_output) ** 2)
 
+            ### section to incorporate cos_sim_loss (for experiment)
+            # cos_sim_loss = (1 - torch.nn.functional.cosine_similarity(target, model_output, dim=1)) * 0.1
+            # if "vb" in terms:
+            #     terms["loss"] = terms["mse"] + terms["vb"] + cos_sim_loss
+            # else:
+            #     terms["loss"] = terms["mse"] + cos_sim_loss
+            ### section end
+            terms["cos_sim_mean"] = torch.nn.functional.cosine_similarity(target, model_output, dim=1)
+
             if "vb" in terms:
                 terms["loss"] = terms["mse"] + terms["vb"]
             else:

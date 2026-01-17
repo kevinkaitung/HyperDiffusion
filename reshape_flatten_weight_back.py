@@ -20,7 +20,8 @@ if __name__ == "__main__":
 
     args=parser.parse_args()
 
-    flatten_weight = torch.load(args.flatten_weight_path)['generated_weights_samples']
+    loaded_model = torch.load(args.flatten_weight_path)
+    flatten_weight = loaded_model['generated_weights_samples']
     sample_model = torch.load(args.sample_model_path)
     
     # use the first sample in the input (flatten weight)
@@ -29,8 +30,11 @@ if __name__ == "__main__":
     save_model = dict()
     save_model['net_state_dict'] = reshape_weight
     # put fake light direction
-    save_model['light_dir_cartesian'] = [[0.5, 0.5, 0.5]]
-    save_model['light_dir_spherical'] = [[0.5, 0.5]]
+    # save_model['light_dir_cartesian'] = [[0.5, 0.5, 0.5]]
+    # save_model['light_dir_spherical'] = [[0.5, 0.5]]
+    # if having real light directions, put them
+    save_model['light_dir_cartesian'] = loaded_model['light_dir_cartesian'][0:1]
+    # save_model['light_dir_spherical'] = [[0.5, 0.5]]
     # import pdb; pdb.set_trace()
     
     torch.save(save_model, os.path.join(args.save_path, 'sample_siren.pt'))

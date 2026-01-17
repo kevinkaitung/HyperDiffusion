@@ -58,6 +58,11 @@ _Note: Category id to name conversion is as follows: 02691156 -> airplane, 02958
 ### Evaluation
 Download **Checkpoints** folder from [Drive](https://drive.google.com/drive/folders/1CuNVa92jcKlGBiHEuCQK2-juAB6Q6QPx?usp=sharing). Assign the path of that checkpoint to the `best_model_save_path` parameter.
 
+My own case:
+```commandline
+python main_for_my_siren.py --config-name=train_siren_single siren_path=/home/kctung/Projects/BlockFusion/logs/HyperDiff_MLP_overfitting_mechhand_256/20260114-170901/pure_siren_model_permuted.pt mode=test run_dir=/home/kctung/Projects/HyperDiffusion/logs/hyperdiff_mlp_uncond_diffusion_mechhand_256/20260114-172443 best_model_save_path="/home/kctung/Projects/HyperDiffusion/logs/hyperdiff_mlp_uncond_diffusion_mechhand_256/20260114-172443/periodic-epoch\=5999-train_loss\=0.0006725.ckpt"
+```
+
 to start evaluating, airplane category:
 ```commandline
 python main.py --config-name=train_plane mode=test best_model_save_path=<path/to/checkpoint>
@@ -75,6 +80,10 @@ python main.py --config-name=train_chair mode=test best_model_save_path=<path/to
 python main.py --config-name=train_4d_animals mode=test best_model_save_path=<path/to/checkpoint>
 ```
 ### Training
+My own case:
+```commandline
+python main_for_my_siren.py --config-name=train_siren_single siren_path=/home/kctung/Projects/BlockFusion/logs/SIREN_overfitting_mechhand_256/20260114-164549/pure_siren_model_permuted.pt expname=uncond_diffusion_mechhand_256_cos_sim_loss
+```
 To start training, airplane category:
 ```commandline
 python main.py --config-name=train_plane

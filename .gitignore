@@ -155,3 +155,5 @@ mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad.zip
 
 # ignore my log files
 logs
+
+run_commands

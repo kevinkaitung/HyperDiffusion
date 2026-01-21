@@ -19,6 +19,7 @@ from siren import sdf_meshing
 from siren.dataio import anime_read
 from siren.experiment_scripts.test_sdf import SDFDecoder
 
+import matplotlib.pyplot as plt
 
 class HyperDiffusion(pl.LightningModule):
     def __init__(
@@ -53,6 +54,8 @@ class HyperDiffusion(pl.LightningModule):
             loss_type=LossType[cfg.diff_config.params.loss_type],
             diff_pl_module=self,
         )
+        self.num_samples_for_val = 16
+        self.noise_for_val = torch.randn((self.num_samples_for_val, *self.image_size[1:]))
 
     def forward(self, images, light_dirs):
         t = (
@@ -187,7 +190,10 @@ class HyperDiffusion(pl.LightningModule):
         loss = loss_mse
         return loss
 
-    # def validation_step(self, val_batch, batch_idx):
+    def validation_step(self, val_batch, batch_idx):
+        mean_PSNR, mean_cosine_similarity = self.generate_samples(self.num_samples_for_val, self.noise_for_val, False)
+        self.log("val/PSNR", mean_PSNR)
+        self.log("val/cosine_similarity", mean_cosine_similarity)
     #     metric_fn = (
     #         self.calc_metrics_4d
     #         if self.cfg.mlp_config.params.move
@@ -653,6 +659,136 @@ class HyperDiffusion(pl.LightningModule):
     #     print("Completed metric computation for", split_type)
 
     #     return metrics
+    
+    # only calculate 1 sample
+    def cal_and_plot_cosine_similarity_against_gt(self, generate_weight_1_sample, is_test=False):
+        '''
+        generate_weight_1_sample: 1D tensor (length: length of the all siren weights in one sample)
+        '''
+        PSNR_list = []
+        cosine_similarity_list = []
+        for idx, (GT_siren_weight, light_dir) in enumerate(self.train_dt):
+            # both 'generate_weight_1_sample' and 'GT_siren_weight' should be flattened SIREN weight of 1 sample (1D tensor)
+            mse = torch.nn.functional.mse_loss(generate_weight_1_sample, GT_siren_weight)
+            max = GT_siren_weight.max() - GT_siren_weight.min()
+            cosine_similarity = torch.nn.functional.cosine_similarity(generate_weight_1_sample, GT_siren_weight, dim=0)
+            PSNR = 20 * torch.log10(max / torch.sqrt(mse))
+            # print(f"instance {idx}: PSNR {PSNR} / cosine similarity {cosine_similarity}")
+            PSNR_list.append(PSNR.item())
+            cosine_similarity_list.append(cosine_similarity.item())
+            
+        plt.plot(range(len(self.train_dt)), PSNR_list)
+        plt.xlabel('instance index')
+        plt.ylabel('PSNR')
+        plt.title(f'Gen SIREN weights quality against all GT SIREN weights in train set (All layers)')
+        if is_test:
+            save_name = f'gen_weights_PSNR_all_tokens_{self.current_epoch}_test.png'
+        else:
+            save_name = f'gen_weights_PSNR_all_tokens_{self.current_epoch}.png'    
+        plt.savefig(os.path.join(self.run_dir, save_name))
+        plt.close()
+
+        plt.plot(range(len(self.train_dt)), cosine_similarity_list)
+        plt.xlabel('instance index')
+        plt.ylabel('cosine_similarity')
+        plt.title(f'Gen SIREN weights quality against all GT SIREN weights in train set (All layers)')
+        if is_test:
+            save_name = f'gen_weights_cosine_similarity_all_tokens_{self.current_epoch}_test.png'
+        else:
+            save_name = f'gen_weights_cosine_similarity_all_tokens_{self.current_epoch}.png'    
+        plt.savefig(os.path.join(self.run_dir, save_name))
+        plt.close()
+        
+        return np.mean(PSNR_list), np.mean(cosine_similarity_list)
+        
+    def evaluate_recon_volume_quality(self):
+        # TODO: decode the volume with gen samples
+        return
+    
+    def calculate_stats_of_train_set_data(self):
+        x_0s = []
+        for i, (img, light_dir) in enumerate(self.train_dt):
+            x_0s.append(img)
+        x_0s = torch.stack(x_0s).to(self.device)
+        flat = x_0s.view(len(x_0s), -1)
+        # return
+        print(x_0s.shape, flat.shape)
+        print("Variance With zero-padding")
+        self.print_summary(flat, torch.var)
+        print("Variance Without zero-padding")
+        self.print_summary(flat[:, : Config.get("curr_weights")], torch.var)
+
+        print("Mean With zero-padding")
+        self.print_summary(flat, torch.mean)
+        print("Mean Without zero-padding")
+        self.print_summary(flat[:, : Config.get("curr_weights")], torch.mean)
+
+        stdev = x_0s.flatten().std(unbiased=True).item()
+        oai_coeff = (
+            0.538 / stdev
+        )  # 0.538 is the variance of ImageNet pixels scaled to [-1, 1]
+        print(f"Standard Deviation: {stdev}")
+        print(f"OpenAI Coefficient: {oai_coeff}")
+        
+    
+    def generate_samples(self, num_samples, noise=None, is_test=False):
+        if noise is not None:
+            assert noise.shape[0] == num_samples, (
+                "the first dim of noise (batch_size) should match num_samples"
+            )
+            noise = noise.to(self.device)
+        
+
+        self.calculate_stats_of_train_set_data()
+        
+        # randomly pick 16 train set light dirs and inference them
+        # HACK: should use same set of light direction if doing validation (as I use same noise for all validation step)
+        # but currently doesn't incorporate conditioning, just leave the code here
+        train_set_light_dirs = self.train_dt.get_all_light_dirs()
+        idx = torch.randperm(train_set_light_dirs.shape[0])[:num_samples]
+        selected_light_dirs = train_set_light_dirs[idx]
+        model_kwargs = {
+            "light_dirs": selected_light_dirs
+        }
+        # Then, sampling some new shapes -> outputting and rendering them
+        x_0s = self.diff.ddim_sample_loop(
+            self.model, (num_samples, *self.image_size[1:]), noise=noise, clip_denoised=False, model_kwargs=model_kwargs
+        )
+        ### section to destandardize
+        if self.train_dt.standardize:
+            token_means = self.train_dt.token_means
+            token_stds = self.train_dt.token_stds
+            token_offsets = self.train_dt.token_offsets
+            idx = 0
+            for token_mean, token_std in zip(token_means, token_stds):
+                start = token_offsets[idx]
+                end = token_offsets[idx + 1]
+                x_0s[:, start:end] = x_0s[:, start:end] * (token_std + 0.0000000001) + token_mean
+
+                idx += 1
+        ### end section
+        x_0s = x_0s / self.cfg.normalization_factor
+
+        print(
+            "x_0s[0].stats",
+            x_0s.min().item(),
+            x_0s.max().item(),
+            x_0s.mean().item(),
+            x_0s.std().item(),
+        )
+        out_pc_imgs = []
+        
+        # only use the first sample to plot cosine similarity evaluation
+        mean_PSNR, mean_cosine_similarity = self.cal_and_plot_cosine_similarity_against_gt(x_0s[0], is_test)
+        
+        # Save generated weights samples to disk
+        if is_test:
+            save_dir = f"{self.run_dir}/generated_weights_samples_{self.current_epoch}_test.pt"
+        else:
+            save_dir = f"{self.run_dir}/generated_weights_samples_{self.current_epoch}_validation.pt"   
+        # os.makedirs(save_dir, exist_ok=True)
+        torch.save({"generated_weights_samples": x_0s, "light_dir_cartesian": selected_light_dirs.tolist()}, save_dir)
+        return mean_PSNR, mean_cosine_similarity
 
     def test_step(self, *args, **kwargs):
     #     if self.cfg.calculate_metric_on_test:
@@ -719,69 +855,7 @@ class HyperDiffusion(pl.LightningModule):
     #         return
     #     # If it's HyperDiffusion, let's calculate some statistics on training dataset
     #     elif self.method == "hyper_3d":
-            x_0s = []
-            for i, (img, light_dir) in enumerate(self.train_dt):
-                x_0s.append(img)
-            x_0s = torch.stack(x_0s).to(self.device)
-            flat = x_0s.view(len(x_0s), -1)
-            # return
-            print(x_0s.shape, flat.shape)
-            print("Variance With zero-padding")
-            self.print_summary(flat, torch.var)
-            print("Variance Without zero-padding")
-            self.print_summary(flat[:, : Config.get("curr_weights")], torch.var)
-
-            print("Mean With zero-padding")
-            self.print_summary(flat, torch.mean)
-            print("Mean Without zero-padding")
-            self.print_summary(flat[:, : Config.get("curr_weights")], torch.mean)
-
-            stdev = x_0s.flatten().std(unbiased=True).item()
-            oai_coeff = (
-                0.538 / stdev
-            )  # 0.538 is the variance of ImageNet pixels scaled to [-1, 1]
-            print(f"Standard Deviation: {stdev}")
-            print(f"OpenAI Coefficient: {oai_coeff}")
-            # randomly pick 16 train set light dirs and inference them
-            train_set_light_dirs = self.train_dt.get_all_light_dirs()
-            idx = torch.randperm(train_set_light_dirs.shape[0])[:16]
-            selected_light_dirs = train_set_light_dirs[idx]
-            model_kwargs = {
-                "light_dirs": selected_light_dirs
-            }
-            # Then, sampling some new shapes -> outputting and rendering them
-            x_0s = self.diff.ddim_sample_loop(
-                self.model, (16, *self.image_size[1:]), clip_denoised=False, model_kwargs=model_kwargs
-            )
-            ### section to destandardize
-            if self.train_dt.standardize:
-                token_means = self.train_dt.token_means
-                token_stds = self.train_dt.token_stds
-                token_offsets = self.train_dt.token_offsets
-                idx = 0
-                for token_mean, token_std in zip(token_means, token_stds):
-                    start = token_offsets[idx]
-                    end = token_offsets[idx + 1]
-                    x_0s[:, start:end] = x_0s[:, start:end] * (token_std + 0.0000000001) + token_mean
-
-                    idx += 1
-            ### end section
-            x_0s = x_0s / self.cfg.normalization_factor
-
-            print(
-                "x_0s[0].stats",
-                x_0s.min().item(),
-                x_0s.max().item(),
-                x_0s.mean().item(),
-                x_0s.std().item(),
-            )
-            out_pc_imgs = []
-            
-            # Save generated weights samples to disk
-            save_dir = self.run_dir
-            # os.makedirs(save_dir, exist_ok=True)
-            torch.save({"generated_weights_samples": x_0s, "light_dir_cartesian": selected_light_dirs.tolist()}, f"{save_dir}/generated_weights_samples.pt")
-            
+        self.generate_samples(16, is_test=True)
             
     #         # Handle 4D generation
     #         if self.cfg.mlp_config.params.move:

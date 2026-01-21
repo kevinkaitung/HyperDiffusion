@@ -244,7 +244,7 @@ def main(cfg: DictConfig):
         input_data[0].min(),
         input_data[0].max(),
     )
-    print(f"Light Direction: {input_data[1]}")
+    # print(f"Light Direction: {input_data[1]}")
 
     best_model_save_path = Config.get("best_model_save_path")
     model_resume_path = Config.get("model_resume_path")
@@ -285,7 +285,7 @@ def main(cfg: DictConfig):
         filename="periodic-{epoch:02d}-{train_loss:.7f}",
         save_top_k=-1,
         save_last=True,
-        every_n_epochs=3000,
+        every_n_epochs=Config.get("model_ckpt_freq"),
     )
 
     lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval="epoch")
@@ -301,7 +301,7 @@ def main(cfg: DictConfig):
             periodic_checkpoint,
             lr_monitor
         ],
-        # check_val_every_n_epoch=Config.get("val_fid_calculation_period"),
+        check_val_every_n_epoch=Config.get("validation_freq"),
         num_sanity_val_steps=0,
         accumulate_grad_batches=cfg.accumulate_grad_batches,
     )

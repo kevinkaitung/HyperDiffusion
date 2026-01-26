@@ -2,6 +2,7 @@ expname: siren_diffusion
 hydra:
   run:
     dir: logs/${expname}/${now:%Y-%m-%d_%H-%M-%S}
+rand_seed: 0
 method: hyper_3d
 calculate_metric_on_test: True
 dedup: False

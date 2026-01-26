@@ -37,6 +37,10 @@ def main(cfg: DictConfig):
     mlp_kwargs = None
 
 
+    # set the seed for reproducibility
+    rand_seed = Config.get("rand_seed")
+    pl.seed_everything(rand_seed, workers=True)
+
     # My note: is this used for generate mesh?
     # I might not need this
     # # In HyperDiffusion, we need to know the specifications of MLPs that are used for overfitting

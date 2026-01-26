@@ -1,6 +1,7 @@
 import torch
 import argparse
 import os
+from pathlib import Path
 
 def reshape_weight_back(input, example_network):
     # input should be 1D tensor (for 1 instance)
@@ -14,13 +15,13 @@ def reshape_weight_back(input, example_network):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--flatten_weight_dir", type=str)
-    parser.add_argument("--flatten_weight_file_name", type=str, default="generated_weights_samples.pt")
+    parser.add_argument("--flatten_weight_file_path", type=str)
+    # parser.add_argument("--flatten_weight_file_name", type=str, default="generated_weights_samples.pt")
     # parser.add_argument("--sample_model_path", type=str)
 
     args=parser.parse_args()
 
-    loaded_model = torch.load(os.path.join(args.flatten_weight_dir, args.flatten_weight_file_name))
+    loaded_model = torch.load(args.flatten_weight_file_path)
     flatten_weight = loaded_model['generated_weights_samples']
     # sample_model = torch.load(args.sample_model_path)
     sample_model = torch.load("/home/kctung/Projects/HyperDiffusion/logs/siren_uncond_diffusion_256/20260106-214220/sample_siren.pt")
@@ -38,4 +39,16 @@ if __name__ == "__main__":
     # save_model['light_dir_spherical'] = [[0.5, 0.5]]
     # import pdb; pdb.set_trace()
     
-    torch.save(save_model, os.path.join(args.flatten_weight_dir, 'sample_siren.pt'))
+    path = Path(args.flatten_weight_file_path)
+    dir_path = path.parent
+    old_file_name = path.name
+    
+    prefix = "generated_weights_samples_"
+    # if passed file name has specific prefix, extract the rest of the name and append to new filename
+    if old_file_name.startswith(prefix):
+        new_file_name = f"sample_siren_{old_file_name[len(prefix):]}"
+    # otherwise, give it a simple name
+    else:
+        new_file_name = "sample_siren.pt"
+    
+    torch.save(save_model, os.path.join(dir_path, new_file_name))

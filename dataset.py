@@ -292,22 +292,24 @@ class LatentEncodingWeightDataset(Dataset):
     
 class SirenWeightDataset(Dataset):
     def __init__(
-        self, siren_weights, light_dirs, model_dims, cfg, standardize=False
+        self, siren_weights, light_dirs, model_dims, cfg, standardize=False, pre_sampled_coord_groups=None, pre_sampled_value_groups=None
     ):
         # receive the siren_weights as loaded_model['net_state_dict'],
         # which has the keys and values
         
         # use the first instance to capture the layer keys of each module instance
         # TODO: might need to check if there are no keys or no first instance etc.
-        layer_keys = set()
+        layer_keys = []
         token_offsets = []
+        token_shapes = []
         offset = 0
         for k in siren_weights.keys():
             if k.startswith('0.'):
                 idx_str, layer_name = k.split(".", 1)
-                layer_keys.add(layer_name)
+                layer_keys.append(layer_name)
                 token_offsets.append(offset)
                 offset += siren_weights[k].numel()
+                token_shapes.append(siren_weights[k].shape)
         token_offsets.append(offset)
         n_layer = len(layer_keys)
         n_instances = int(len(siren_weights.keys()) / n_layer)
@@ -346,6 +348,8 @@ class SirenWeightDataset(Dataset):
         self.token_means = token_means
         self.token_stds = token_stds
         self.token_offsets = token_offsets
+        self.layer_keys = layer_keys
+        self.token_shapes = token_shapes
         
         self.n_params = n_instances
         self.condition = cfg.transformer_config.params.condition
@@ -356,9 +360,16 @@ class SirenWeightDataset(Dataset):
         
         self.model_dims = model_dims
         self.cfg = cfg
+        
+        # prepare the presample points for evaluating geometry loss (each instance should have a set of coords/scalar values pair)
+        self.pre_sampled_coord_groups = pre_sampled_coord_groups
+        self.pre_sampled_value_groups = pre_sampled_value_groups
+        self.pre_sampled_batch_size = 2**12
 
     def __getitem__(self, index):
-        return self.siren_weights[index].flatten(), self.light_dirs[index]
+        pre_sampled_coord = self.pre_sampled_coord_groups[index]
+        selected_sampled_indices = torch.randint(0, pre_sampled_coord.shape[0], (self.pre_sampled_batch_size,), device=pre_sampled_coord.device)
+        return self.siren_weights[index].flatten(), self.light_dirs[index], self.pre_sampled_coord_groups[index][selected_sampled_indices], self.pre_sampled_value_groups[index][selected_sampled_indices]
 
     def __len__(self):
         return self.n_params

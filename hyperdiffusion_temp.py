@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 
 class HyperDiffusion(pl.LightningModule):
     def __init__(
-        self, model, train_dt, val_dt, test_dt, mlp_kwargs, image_shape, method, cfg, run_dir
+        self, model, train_dt, val_dt, test_dt, mlp_kwargs, image_shape, method, cfg, run_dir, geometry_loss_evaluator
     ):
         super().__init__()
         self.model = model
@@ -56,6 +56,8 @@ class HyperDiffusion(pl.LightningModule):
         )
         self.num_samples_for_val = 16
         self.noise_for_val = torch.randn((self.num_samples_for_val, *self.image_size[1:]))
+        
+        self.geometry_loss_evaluator = geometry_loss_evaluator
 
     def forward(self, images, light_dirs):
         t = (
@@ -169,6 +171,10 @@ class HyperDiffusion(pl.LightningModule):
         model_kwargs = {
             "light_dirs": input_data[1]
         }
+        additional_args = {
+            "pre_sampled_coord_groups": input_data[2],
+            "pre_sampled_value_groups": input_data[3]
+        }
         # Execute a diffusion forward pass
         loss_terms = self.diff.training_losses(
             self.model,
@@ -177,15 +183,19 @@ class HyperDiffusion(pl.LightningModule):
             self.mlp_kwargs,
             self.logger,
             model_kwargs=model_kwargs,
+            additional_args=additional_args,
+            geometry_loss_evaluator=self.geometry_loss_evaluator
         )
         loss_mse = loss_terms["loss"].mean()
         self.log("train_loss", loss_mse)
-        
+        self.log("mse_loss", loss_terms["mse"].mean())
         # Output cosine similarity every 100 step
         if self.trainer.global_step % 100 == 0:
             print("cosine similarity between predicted weights and original weights: ", loss_terms["cos_sim_mean"].mean())
+            print("geometry loss: ", loss_terms["geometry_loss"].mean())
+            print("mse loss: ", loss_terms["mse"].mean())
         self.log("cosine_similarity", loss_terms["cos_sim_mean"].mean())
-
+        self.log("geometry_loss", loss_terms["geometry_loss"].mean())
 
         loss = loss_mse
         return loss
@@ -667,7 +677,9 @@ class HyperDiffusion(pl.LightningModule):
         '''
         PSNR_list = []
         cosine_similarity_list = []
-        for idx, (GT_siren_weight, light_dir) in enumerate(self.train_dt):
+        for idx, (GT_siren_weight, light_dir, _, _) in enumerate(self.train_dt):
+            # TODO: make sure why generate_weight_1_sample and GT_siren_weight are not at the same device
+            GT_siren_weight = GT_siren_weight.to(self.device)
             # both 'generate_weight_1_sample' and 'GT_siren_weight' should be flattened SIREN weight of 1 sample (1D tensor)
             mse = torch.nn.functional.mse_loss(generate_weight_1_sample, GT_siren_weight)
             max = GT_siren_weight.max() - GT_siren_weight.min()
@@ -707,7 +719,7 @@ class HyperDiffusion(pl.LightningModule):
     
     def calculate_stats_of_train_set_data(self):
         x_0s = []
-        for i, (img, light_dir) in enumerate(self.train_dt):
+        for i, (img, light_dir, _, _) in enumerate(self.train_dt):
             x_0s.append(img)
         x_0s = torch.stack(x_0s).to(self.device)
         flat = x_0s.view(len(x_0s), -1)

@@ -25,6 +25,7 @@ from transformer import Transformer
 sys.path.append("siren")
 
 from temp_exps_helper import calculate_siren_weights_n_parameters
+from assess_geometry_loss import GeometryLossEvaluator
 
 @hydra.main(
     version_base=None,
@@ -185,13 +186,18 @@ def main(cfg: DictConfig):
             loaded_model["light_dir_cartesian"],
             model.dims,
             cfg,
-            standardize=False
+            standardize=False,
+            pre_sampled_coord_groups=loaded_model["pre_sampled_coord_groups"],
+            pre_sampled_value_groups=loaded_model["pre_sampled_value_groups"]
         )
         train_dl = DataLoader(
             train_dt,
             batch_size=Config.get("batch_size"),
             shuffle=True,
         )
+        
+        # TODO: be aware of the batch size passed in (might not work for dist training now)
+        geometry_loss_evaluator = GeometryLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets, Config.get("batch_size"))
         # normalize with std of all siren weights (just for experiment)
         # cfg.normalization_factor = (1.0 / (train_dt.std)).item()
         # val_dt = WeightDataset(
@@ -255,7 +261,7 @@ def main(cfg: DictConfig):
 
     # Initialize HyperDiffusion
     diffuser = HyperDiffusion(
-        model, train_dt, val_dt, test_dt, mlp_kwargs, input_data[0].shape, method, cfg, run_dir
+        model, train_dt, val_dt, test_dt, mlp_kwargs, input_data[0].shape, method, cfg, run_dir, geometry_loss_evaluator
     )
 
     # # Specify where to save checkpoints

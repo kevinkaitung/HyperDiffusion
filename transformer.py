@@ -388,6 +388,33 @@ class FrequencyEmbedder(nn.Module):
         )  # (N, D * 2 * num_frequencies + D)
         return embedded
 
+# copy from diffusers/models/embeddings.py
+# almost same as FrequencyEmbedder (the above class) but do not cat raw input at the back of embedding
+class FourierEmbedder(torch.nn.Module):
+    def __init__(self, num_freqs=64, temperature=100):
+        super().__init__()
+
+        self.num_freqs = num_freqs
+        self.temperature = temperature
+
+        freq_bands = temperature ** (torch.arange(num_freqs) / num_freqs)
+        # shape of freq_bands: (#freqs, )
+        freq_bands = freq_bands[None, None, None]
+        # shape of freq_bands: (1, 1, 1, #freqs)
+        # array[None] equivalent to freq_bands.unsqueeze(0) 
+        self.register_buffer("freq_bands", freq_bands, persistent=False)
+
+    def __call__(self, x):
+        # shape of x: (batch_size, 3 (dims of light directions))
+        # shape of freq_bands: (1, 1, 1, #freqs); shape of x.unsqueeze(-1): (batch_size, 3, 1)
+        x = self.freq_bands * x.unsqueeze(-1)
+        # shape of x: (1, batch_size, 3 (Channels/light dir dim), #freqs)
+        # shape of torch.stack((x.sin(), x.cos()), dim=-1): (1, batch_size, 3 (Channels), #freqs, 2 (sin and cos))
+        # shape after permutation: (1, batch_size, #freqs, 2 (sin and cos), 3 (Channels))
+        # shape after reshape: (1, batch_size, #freqs * 2 (sin and cos) * 3 (Channels))
+        # final shape (1, batch_size, #channel for each light direction)
+        return torch.stack((x.sin(), x.cos()), dim=-1).permute(0, 1, 3, 4, 2).reshape(*x.shape[:2], -1)[0]
+        # return shape (batch_size, #channel for each light direction)
 
 class Transformer(nn.Module):
 
@@ -429,6 +456,7 @@ class Transformer(nn.Module):
             **gpt_kwargs,
         )
         self.scalar_embedder = FrequencyEmbedder(num_frequencies, max_freq_log2)
+        self.light_embedder = FourierEmbedder(num_freqs=num_frequencies)
 
         # Initialize with identity output:
         if self.use_global_residual:
@@ -474,9 +502,10 @@ class Transformer(nn.Module):
         input_parameter_names.extend(["timestep_embedding"])
         # HACK/TODO: might need to give light different embedding other than the same as timestep
         # NOTE: temporarily disable light conditioning
-        # scalar_token_size_light = [self.get_scalar_token_size(num_frequencies) * 3]
-        # input_parameter_sizes.extend([scalar_token_size_light])
-        # input_parameter_names.extend(["light_dir_embedding"])
+        # number of freqs * 3 coordinates * 2 (sin and cos)
+        scalar_token_size_light = [num_frequencies * 3 * 2]
+        input_parameter_sizes.extend([scalar_token_size_light])
+        input_parameter_names.extend(["light_dir_embedding"])
         return input_parameter_sizes, output_parameter_sizes, input_parameter_names
 
     def configure_optimizers(self, lr, wd, betas):
@@ -515,16 +544,17 @@ class Transformer(nn.Module):
         ----------------------------------------------
         """
         t_embedding = self.scalar_embedder(t)
-        light_embedding = self.scalar_embedder(light_dirs)
+        # light_embedding = self.scalar_embedder(light_dirs)
+        light_embedding = self.light_embedder(light_dirs)
         # loss_embedding = self.embed_loss(loss_target, loss_prev)
         if self.use_global_residual:
             x_prev = x_prev.unsqueeze(0).repeat((len(x), 1))
             assert x.shape == x_prev.shape
-            # inp = [x, x_prev, t_embedding, light_embedding]
-            inp = [x, x_prev, t_embedding]
+            inp = [x, x_prev, t_embedding, light_embedding]
+            # inp = [x, x_prev, t_embedding]
         else:
-            # inp = [x, t_embedding, light_embedding]
-            inp = [x, t_embedding]
+            inp = [x, t_embedding, light_embedding]
+            # inp = [x, t_embedding]
         inp = torch.cat(inp, 1)
         output = self.decoder(inp)
         # TODO: Global residual connection:

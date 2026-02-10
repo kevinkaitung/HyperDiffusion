@@ -105,15 +105,21 @@ class NeurCompNet(torch.nn.Module):
 # TODO: fix the issue if the training is distributed
 # need to know training batch size on one node first
 class GeometryLossEvaluator:
-    def __init__(self, model_layer_keys, model_layer_shapes, element_offsets, training_batch_size):
+    def __init__(self, model_layer_keys, model_layer_shapes, element_offsets, training_batch_size, 
+                 token_means=None, token_stds=None, is_standardized=False):
         #HACK: currently hard code the hyperparameters for NeurCompNet as I only work on this set of config now
         nets = [
-            NeurCompNet(n_input_dims=3, n_output_dims=1, bias=False, n_hidden_layers=4, n_neurons=128, is_residual=True).cuda()
+            NeurCompNet(n_input_dims=3, n_output_dims=1, bias=False, n_hidden_layers=4, n_neurons=128, is_residual=True)
             for _ in range(training_batch_size)]
         self.nets = nn.ModuleList(nets)
         self.model_layer_keys = model_layer_keys
         self.model_layer_shapes = model_layer_shapes
         self.element_offsets = element_offsets
+        
+        self.token_means = token_means
+        self.token_stds = token_stds
+        
+        self.is_standardized = is_standardized
         
         # NOTE: freeze the weight for evaluating geometry loss
         for net in self.nets:
@@ -124,17 +130,49 @@ class GeometryLossEvaluator:
         
     def load_params_to_siren_model(self, flatten_siren_weights):
         net_dict = dict()
-        for idx_i in range(len(self.nets)):
-            for idx_j, (key, shape) in enumerate(zip(self.model_layer_keys, self.model_layer_shapes)):
-                start = self.element_offsets[idx_j]
-                end = self.element_offsets[idx_j + 1]
-                net_dict[f'{idx_i}.{key}'] = flatten_siren_weights[idx_i, start:end].reshape(shape)
+        if self.is_standardized:
+            for idx_i in range(len(self.nets)):
+                for idx_j, (key, shape, mean, std) in enumerate(zip(self.model_layer_keys, self.model_layer_shapes, self.token_means, self.token_stds)):
+                    start = self.element_offsets[idx_j]
+                    end = self.element_offsets[idx_j + 1]
+                    # NOTE: we need to destandardize here
+                    net_dict[f'{idx_i}.{key}'] = flatten_siren_weights[idx_i, start:end].reshape(shape) * std + mean
+        else:
+            for idx_i in range(len(self.nets)):
+                for idx_j, (key, shape) in enumerate(zip(self.model_layer_keys, self.model_layer_shapes)):
+                    start = self.element_offsets[idx_j]
+                    end = self.element_offsets[idx_j + 1]
+                    net_dict[f'{idx_i}.{key}'] = flatten_siren_weights[idx_i, start:end].reshape(shape)
         # print(net_dict.keys())
+        self.nets = self.nets.to(flatten_siren_weights.device)
         self.nets.load_state_dict(net_dict)
 
+    # def load_params_to_siren_model(self, flatten_siren_weights):
+    #     # net_dict = dict()
+    #     self.nets = self.nets.to(flatten_siren_weights.device)
+    #     if self.is_standardized:
+    #         for idx_i in range(len(self.nets)):
+    #             for idx_j, (key, shape, mean, std, name_params_tuple) in enumerate(zip(self.model_layer_keys, self.model_layer_shapes, self.token_means, self.token_stds, self.nets[idx_i].named_parameters())):
+    #                 start = self.element_offsets[idx_j]
+    #                 end = self.element_offsets[idx_j + 1]
+    #                 # NOTE: we need to destandardize here
+    #                 # net_dict[f'{idx_i}.{key}'] = flatten_siren_weights[idx_i, start:end].reshape(shape) * std + mean
+    #                 name_params_tuple[1].copy_(flatten_siren_weights[idx_i, start:end].reshape(shape) * std + mean)
+    #     else:
+    #         for idx_i in range(len(self.nets)):
+    #             for idx_j, (key, shape, name_params_tuple) in enumerate(zip(self.model_layer_keys, self.model_layer_shapes, self.nets[idx_i].named_parameters())):
+    #                 start = self.element_offsets[idx_j]
+    #                 end = self.element_offsets[idx_j + 1]
+    #                 # net_dict[f'{idx_i}.{key}'] = flatten_siren_weights[idx_i, start:end].reshape(shape)
+    #                 name_params_tuple[1].copy_(flatten_siren_weights[idx_i, start:end].reshape(shape))
+    #     # print(net_dict.keys())
+    #     # self.nets.load_state_dict(net_dict)
+
     def evaluate_geometry_loss(self, pre_sampled_coord_groups, pre_sampled_value_groups):
-        # TODO: check the shape
-        mse_loss = torch.tensor(0.0).cuda()
+        net_device = next(self.nets.parameters()).device
+        pre_sampled_coord_groups = pre_sampled_coord_groups.to(net_device)
+        pre_sampled_value_groups = pre_sampled_value_groups.to(net_device)
+        mse_loss = torch.tensor(0.0).to(net_device)
         for batch_idx, net in enumerate(self.nets):
             output = net(pre_sampled_coord_groups[batch_idx].float()).float()
             # NOTE: make output a 1D tensor which is same as pre-sampled value groups

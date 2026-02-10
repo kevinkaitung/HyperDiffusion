@@ -186,7 +186,7 @@ def main(cfg: DictConfig):
             loaded_model["light_dir_cartesian"],
             model.dims,
             cfg,
-            standardize=False,
+            standardize=Config.get("standardize"),
             pre_sampled_coord_groups=loaded_model["pre_sampled_coord_groups"],
             pre_sampled_value_groups=loaded_model["pre_sampled_value_groups"]
         )

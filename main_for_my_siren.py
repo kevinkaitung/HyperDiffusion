@@ -49,7 +49,7 @@ def main(cfg: DictConfig):
     #     mlp_kwargs = Config.config["mlp_config"]["params"]
 
     # load pre-trained weights
-    loaded_model = torch.load(Config.get("siren_path"))
+    loaded_model = torch.load(Config.get("siren_path"), map_location="cpu")
     
     if Config.get("mode") == "train":
         # get the hydra log directory
@@ -194,6 +194,7 @@ def main(cfg: DictConfig):
             train_dt,
             batch_size=Config.get("batch_size"),
             shuffle=True,
+            drop_last=True,
         )
         
         # TODO: be aware of the batch size passed in (might not work for dist training now)

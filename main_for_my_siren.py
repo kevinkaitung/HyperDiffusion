@@ -204,7 +204,7 @@ def main(cfg: DictConfig):
         )
         
         # TODO: be aware of the batch size passed in (might not work for dist training now)
-        geometry_loss_evaluator = GeometryLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets, Config.get("batch_size"))
+        geometry_loss_evaluator = GeometryLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets, Config.get("batch_size"), train_dt.token_means, train_dt.token_stds, Config.get("standardize"))
         # normalize with std of all siren weights (just for experiment)
         # cfg.normalization_factor = (1.0 / (train_dt.std)).item()
         # val_dt = WeightDataset(

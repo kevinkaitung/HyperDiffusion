@@ -829,11 +829,14 @@ class GaussianDiffusion:
             assert model_output.shape == target.shape == x_start.shape
             # mlp = MLP(**mlp_kwargs)
             terms["mse"] = mean_flat((target - model_output) ** 2)
-            geometry_loss_evaluator.load_params_to_siren_model(model_output)
                         
             ### section to incorporate geometry loss
-            terms["geometry_loss"] = geometry_loss_evaluator.evaluate_geometry_loss(additional_args["pre_sampled_coord_groups"], additional_args["pre_sampled_value_groups"])
+            # geometry_loss_evaluator.load_params_to_siren_model(model_output)
+            # terms["geometry_loss"] = geometry_loss_evaluator.evaluate_geometry_loss(additional_args["pre_sampled_coord_groups"], additional_args["pre_sampled_value_groups"])
+            # NOTE: consolidate two old functions related to geometry loss evaluation into one
+            terms["geometry_loss"] = geometry_loss_evaluator.evaluate_geometry_loss(model_output, additional_args["pre_sampled_coord_groups"], additional_args["pre_sampled_value_groups"])
             ### section end
+            
 
             ### section to incorporate cos_sim_loss (for experiment)
             # cos_sim_loss = (1 - torch.nn.functional.cosine_similarity(target, model_output, dim=1)) * 0.1

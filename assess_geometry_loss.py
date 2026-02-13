@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from torch import distributions as dist
+import functorch
 
 # copy from https://github.com/wilsonCernWq/instant-vnr-pytorch/blob/main/core/networks.py
 
@@ -111,7 +112,9 @@ class GeometryLossEvaluator:
         nets = [
             NeurCompNet(n_input_dims=3, n_output_dims=1, bias=False, n_hidden_layers=4, n_neurons=128, is_residual=True)
             for _ in range(training_batch_size)]
-        self.nets = nn.ModuleList(nets)
+        # no need to convert nets as nn.ModuleList if performing vmap
+        # self.nets = nn.ModuleList(nets)
+        self.nets = nets
         self.model_layer_keys = model_layer_keys
         self.model_layer_shapes = model_layer_shapes
         self.element_offsets = element_offsets
@@ -125,27 +128,29 @@ class GeometryLossEvaluator:
         for net in self.nets:
             for p in net.parameters():
                 p.requires_grad = False
+            net.eval()
 
-        self.nets.eval()
+        # self.nets.eval()
         
-    def load_params_to_siren_model(self, flatten_siren_weights):
-        net_dict = dict()
-        if self.is_standardized:
-            for idx_i in range(len(self.nets)):
-                for idx_j, (key, shape, mean, std) in enumerate(zip(self.model_layer_keys, self.model_layer_shapes, self.token_means, self.token_stds)):
-                    start = self.element_offsets[idx_j]
-                    end = self.element_offsets[idx_j + 1]
-                    # NOTE: we need to destandardize here
-                    net_dict[f'{idx_i}.{key}'] = flatten_siren_weights[idx_i, start:end].reshape(shape) * std + mean
-        else:
-            for idx_i in range(len(self.nets)):
-                for idx_j, (key, shape) in enumerate(zip(self.model_layer_keys, self.model_layer_shapes)):
-                    start = self.element_offsets[idx_j]
-                    end = self.element_offsets[idx_j + 1]
-                    net_dict[f'{idx_i}.{key}'] = flatten_siren_weights[idx_i, start:end].reshape(shape)
-        # print(net_dict.keys())
-        self.nets = self.nets.to(flatten_siren_weights.device)
-        self.nets.load_state_dict(net_dict)
+    # NOTE: load_state_dict might break computational graph -> fail to pass gradients back into diffusion model
+    # def load_params_to_siren_model(self, flatten_siren_weights):
+    #     net_dict = dict()
+    #     if self.is_standardized:
+    #         for idx_i in range(len(self.nets)):
+    #             for idx_j, (key, shape, mean, std) in enumerate(zip(self.model_layer_keys, self.model_layer_shapes, self.token_means, self.token_stds)):
+    #                 start = self.element_offsets[idx_j]
+    #                 end = self.element_offsets[idx_j + 1]
+    #                 # NOTE: we need to destandardize here
+    #                 net_dict[f'{idx_i}.{key}'] = flatten_siren_weights[idx_i, start:end].reshape(shape) * std + mean
+    #     else:
+    #         for idx_i in range(len(self.nets)):
+    #             for idx_j, (key, shape) in enumerate(zip(self.model_layer_keys, self.model_layer_shapes)):
+    #                 start = self.element_offsets[idx_j]
+    #                 end = self.element_offsets[idx_j + 1]
+    #                 net_dict[f'{idx_i}.{key}'] = flatten_siren_weights[idx_i, start:end].reshape(shape)
+    #     # print(net_dict.keys())
+    #     self.nets = self.nets.to(flatten_siren_weights.device)
+    #     self.nets.load_state_dict(net_dict)
 
     # def load_params_to_siren_model(self, flatten_siren_weights):
     #     # net_dict = dict()
@@ -168,14 +173,67 @@ class GeometryLossEvaluator:
     #     # print(net_dict.keys())
     #     # self.nets.load_state_dict(net_dict)
 
-    def evaluate_geometry_loss(self, pre_sampled_coord_groups, pre_sampled_value_groups):
-        net_device = next(self.nets.parameters()).device
-        pre_sampled_coord_groups = pre_sampled_coord_groups.to(net_device)
-        pre_sampled_value_groups = pre_sampled_value_groups.to(net_device)
-        mse_loss = torch.tensor(0.0).to(net_device)
-        for batch_idx, net in enumerate(self.nets):
-            output = net(pre_sampled_coord_groups[batch_idx].float()).float()
-            # NOTE: make output a 1D tensor which is same as pre-sampled value groups
-            mse_loss += F.mse_loss(output.flatten(), pre_sampled_value_groups[batch_idx])
+    # NOTE: use functional_call instead to inference the SIREN model
+    # def evaluate_geometry_loss(self, pre_sampled_coord_groups, pre_sampled_value_groups):
+    #     net_device = next(self.nets.parameters()).device
+    #     pre_sampled_coord_groups = pre_sampled_coord_groups.to(net_device)
+    #     pre_sampled_value_groups = pre_sampled_value_groups.to(net_device)
+    #     mse_loss = torch.tensor(0.0).to(net_device)
+    #     for batch_idx, net in enumerate(self.nets):
+    #         output = net(pre_sampled_coord_groups[batch_idx].float()).float()
+    #         # NOTE: make output a 1D tensor which is same as pre-sampled value groups
+    #         mse_loss += F.mse_loss(output.flatten(), pre_sampled_value_groups[batch_idx])
         
-        return mse_loss / len(self.nets)
+    #     return mse_loss / len(self.nets)
+    
+    def build_batched_params(self, flatten_siren_weights):
+        """
+        Build a batched params dict directly from diffusion output weights.
+        Shape of each value: (batch_size, *param_shape)
+        This keeps the computational graph alive.
+        """
+        batched_params = {}
+        for idx_j, (key, shape) in enumerate(zip(self.model_layer_keys, self.model_layer_shapes)):
+            start = self.element_offsets[idx_j]
+            end   = self.element_offsets[idx_j + 1]
+            
+            # flatten_siren_weights: (batch, total_params)
+            # sliced: (batch, param_elements) → (batch, *param_shape)
+            w = flatten_siren_weights[:, start:end].reshape(-1, *shape)
+            
+            if self.is_standardized:
+                mean = self.token_means[idx_j]  # make sure these are tensors
+                std  = self.token_stds[idx_j]
+                w = w * std + mean              # still in graph ✓
+            
+            batched_params[key] = w             # (batch, *param_shape)
+        
+        return batched_params
+
+
+
+    def evaluate_geometry_loss(self, flatten_siren_weights,
+                                pre_sampled_coord_groups,
+                                pre_sampled_value_groups):
+        model_device = flatten_siren_weights.device
+        # set non_blocking to True -> tensors die after out of scope -> hope it can avoid OOM error
+        coords = pre_sampled_coord_groups.to(model_device, non_blocking=True).float()   # (batch, N, 3)
+        values = pre_sampled_value_groups.to(model_device, non_blocking=True).float()   # (batch, N)
+
+        # Batched params built from diffusion output — graph intact ✓
+        batched_params = self.build_batched_params(flatten_siren_weights)
+
+        # Use nets[0] as the "template" architecture for functional_call
+        # vmap will automatically unbatch params along dim=0 per call
+        # HACK: because my pytorch is too old, need to install functorch to load vmap
+        # and load functional_call with very old namespace (torch.nn.utils.stateless)
+        # TODO: upgrade Pytorch later
+        def single_forward(params, x):
+            return torch.nn.utils.stateless.functional_call(self.nets[0], params, x)
+
+        batched_output = functorch.vmap(single_forward)(batched_params, coords)
+        # batched_output: (batch, N, 1)
+        
+        geometry_loss = F.mse_loss(batched_output.flatten(1), values)
+        
+        return geometry_loss

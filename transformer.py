@@ -431,7 +431,7 @@ class Transformer(nn.Module):
         predict_xstart=True,  # if True, G.pt predicts signal (False = predict noise)
         absolute_loss_conditioning=False,  # if True, adds two extra input tokens indicating starting/target metrics
         use_global_residual=False,
-        condition="no",
+        condition="no", # accept condition types: "light", "volume_timestep"
         condition_n_points=0,
         **gpt_kwargs,  # Arguments for the Transformer model (depth, heads, etc.)
     ):
@@ -447,7 +447,7 @@ class Transformer(nn.Module):
             input_parameter_sizes,
             output_parameter_sizes,
             input_parameter_names,
-        ) = self.compute_token_sizes(parameter_sizes, parameter_names, num_frequencies)
+        ) = self.compute_token_sizes(parameter_sizes, parameter_names, num_frequencies, condition)
         self.input_parameter_sizes = input_parameter_sizes
         self.decoder = GPT(
             input_parameter_sizes,
@@ -456,7 +456,10 @@ class Transformer(nn.Module):
             **gpt_kwargs,
         )
         self.scalar_embedder = FrequencyEmbedder(num_frequencies, max_freq_log2)
-        self.light_embedder = FourierEmbedder(num_freqs=num_frequencies)
+        if condition == "light":
+            self.condition_embedder = FourierEmbedder(num_freqs=num_frequencies)
+        elif condition == "volume_timestep":
+            self.condition_embedder = FrequencyEmbedder(num_frequencies, max_freq_log2)
 
         # Initialize with identity output:
         if self.use_global_residual:
@@ -470,7 +473,7 @@ class Transformer(nn.Module):
         """
         return num_frequencies * 2 + 1
 
-    def compute_token_sizes(self, parameter_sizes, parameter_names, num_frequencies):
+    def compute_token_sizes(self, parameter_sizes, parameter_names, num_frequencies, condition_type):
         """
         This function returns a few different lists which are used to construct the GPT model.
 
@@ -500,12 +503,15 @@ class Transformer(nn.Module):
         scalar_token_size = [self.get_scalar_token_size(num_frequencies)]
         input_parameter_sizes.extend([scalar_token_size])
         input_parameter_names.extend(["timestep_embedding"])
-        # HACK/TODO: might need to give light different embedding other than the same as timestep
-        # NOTE: temporarily disable light conditioning
         # number of freqs * 3 coordinates * 2 (sin and cos)
-        scalar_token_size_light = [num_frequencies * 3 * 2]
-        input_parameter_sizes.extend([scalar_token_size_light])
-        input_parameter_names.extend(["light_dir_embedding"])
+        if condition_type == "light":
+            scalar_token_size_light = [num_frequencies * 3 * 2]
+            input_parameter_sizes.extend([scalar_token_size_light])
+            input_parameter_names.extend(["light_dir_embedding"])
+        elif condition_type == "volume_timestep":
+            scalar_token_size_volume_timestep = [self.get_scalar_token_size(num_frequencies)]
+            input_parameter_sizes.extend([scalar_token_size_volume_timestep])
+            input_parameter_names.extend(["volume_timestep_embedding"])
         return input_parameter_sizes, output_parameter_sizes, input_parameter_names
 
     def configure_optimizers(self, lr, wd, betas):
@@ -526,7 +532,7 @@ class Transformer(nn.Module):
         total_norm = total_norm**0.5
         return total_norm
 
-    def forward(self, x, t, light_dirs, x_prev=None):
+    def forward(self, x, t, cond_input, x_prev=None):
         """
         Full G.pt forward pass.
         ----------------------------------------------
@@ -535,7 +541,9 @@ class Transformer(nn.Module):
         ----------------------------------------------
         x: (N, D) tensor of noised updated parameters
         t: (N, 1) tensor indicating the diffusion timestep
-        light_dirs: (N, 3) tensor of light directions (cartesian coordinates)
+        cond_input can be:
+            1. light_dirs: (N, 3) tensor of light directions (cartesian coordinates)
+            2. volume_timestep: (N, 1) tensor of volume timestep
         loss_target: (N, 1) tensor, the prompted (desired) loss/error/return
         loss_prev: (N, 1) tensor, loss/error/return obtained by x_prev
         x_prev: (N, D) tensor of starting parameters that are being updated
@@ -544,16 +552,15 @@ class Transformer(nn.Module):
         ----------------------------------------------
         """
         t_embedding = self.scalar_embedder(t)
-        # light_embedding = self.scalar_embedder(light_dirs)
-        light_embedding = self.light_embedder(light_dirs)
+        cond_embedding = self.condition_embedder(cond_input)
         # loss_embedding = self.embed_loss(loss_target, loss_prev)
         if self.use_global_residual:
             x_prev = x_prev.unsqueeze(0).repeat((len(x), 1))
             assert x.shape == x_prev.shape
-            inp = [x, x_prev, t_embedding, light_embedding]
+            inp = [x, x_prev, t_embedding, cond_embedding]
             # inp = [x, x_prev, t_embedding]
         else:
-            inp = [x, t_embedding, light_embedding]
+            inp = [x, t_embedding, cond_embedding]
             # inp = [x, t_embedding]
         inp = torch.cat(inp, 1)
         output = self.decoder(inp)

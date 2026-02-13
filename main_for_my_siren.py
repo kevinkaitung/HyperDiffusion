@@ -181,9 +181,15 @@ def main(cfg: DictConfig):
         # test_object_names = set([str.split(".")[0] for str in test_object_names])
         # # assert len(train_object_names) == train_size, f"{len(train_object_names)} {train_size}"
 
+        if cfg.transformer_config.params.condition == "light":
+            cond_inputs = loaded_model["light_dir_cartesian"]
+        elif cfg.transformer_config.params.condition == "volume_timestep":
+            cond_inputs = loaded_model["timesteps"]
+
+
         train_dt = SirenWeightDataset(
             loaded_model["net_state_dict"],
-            loaded_model["light_dir_cartesian"],
+            cond_inputs,
             model.dims,
             cfg,
             standardize=Config.get("standardize"),

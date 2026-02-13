@@ -58,8 +58,9 @@ class HyperDiffusion(pl.LightningModule):
         self.noise_for_val = torch.randn((self.num_samples_for_val, *self.image_size[1:]))
         
         self.geometry_loss_evaluator = geometry_loss_evaluator
+        self.condition_type = cfg.transformer_config.params.condition
 
-    def forward(self, images, light_dirs):
+    def forward(self, images, cond_input):
         t = (
             torch.randint(0, high=self.diff.num_timesteps, size=(images.shape[0],))
             .long()
@@ -69,7 +70,7 @@ class HyperDiffusion(pl.LightningModule):
         x_t, e = self.diff.q_sample(images, t)
         x_t = x_t.float()
         e = e.float()
-        return self.model(x_t, t, light_dirs), e
+        return self.model(x_t, t, cond_input), e
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=Config.get("lr"))
@@ -169,7 +170,7 @@ class HyperDiffusion(pl.LightningModule):
         )
         # pass conditioning via model_kwargs (not mlp_kwargs)
         model_kwargs = {
-            "light_dirs": input_data[1]
+            "cond_input": input_data[1]
         }
         additional_args = {
             "pre_sampled_coord_groups": input_data[2],
@@ -756,11 +757,11 @@ class HyperDiffusion(pl.LightningModule):
         # randomly pick 16 train set light dirs and inference them
         # HACK: should use same set of light direction if doing validation (as I use same noise for all validation step)
         # but currently doesn't incorporate conditioning, just leave the code here
-        train_set_light_dirs = self.train_dt.get_all_light_dirs()
-        idx = torch.randperm(train_set_light_dirs.shape[0])[:num_samples]
-        selected_light_dirs = train_set_light_dirs[idx]
+        train_set_cond_inputs = self.train_dt.get_all_cond_inputs()
+        idx = torch.randperm(train_set_cond_inputs.shape[0])[:num_samples]
+        selected_cond_inputs = train_set_cond_inputs[idx]
         model_kwargs = {
-            "light_dirs": selected_light_dirs
+            "cond_input": selected_cond_inputs
         }
         # Then, sampling some new shapes -> outputting and rendering them
         x_0s = self.diff.ddim_sample_loop(
@@ -799,7 +800,10 @@ class HyperDiffusion(pl.LightningModule):
         else:
             save_dir = f"{self.run_dir}/generated_weights_samples_{self.current_epoch}_validation.pt"   
         # os.makedirs(save_dir, exist_ok=True)
-        torch.save({"generated_weights_samples": x_0s, "light_dir_cartesian": selected_light_dirs.tolist()}, save_dir)
+        if self.condition_type == "light":
+            torch.save({"generated_weights_samples": x_0s, "light_dir_cartesian": selected_cond_inputs.tolist()}, save_dir)
+        elif self.condition_type == "volume_timestep":
+            torch.save({"generated_weights_samples": x_0s, "timesteps": selected_cond_inputs.tolist()}, save_dir)
         return mean_PSNR, mean_cosine_similarity
 
     def test_step(self, *args, **kwargs):

@@ -292,7 +292,7 @@ class LatentEncodingWeightDataset(Dataset):
     
 class SirenWeightDataset(Dataset):
     def __init__(
-        self, siren_weights, light_dirs, model_dims, cfg, standardize=False, pre_sampled_coord_groups=None, pre_sampled_value_groups=None
+        self, siren_weights, cond_inputs, model_dims, cfg, standardize=False, pre_sampled_coord_groups=None, pre_sampled_value_groups=None
     ):
         # receive the siren_weights as loaded_model['net_state_dict'],
         # which has the keys and values
@@ -317,7 +317,7 @@ class SirenWeightDataset(Dataset):
         # create a unified tensor for all instances    
         # 2D (#instances, flatten weights for all layers)
         self.siren_weights = []
-        self.light_dirs = torch.tensor(light_dirs).cuda()
+        self.cond_inputs = torch.tensor(cond_inputs).cuda()
         
         temp = []
         for idx in range(n_instances):
@@ -369,10 +369,10 @@ class SirenWeightDataset(Dataset):
     def __getitem__(self, index):
         pre_sampled_coord = self.pre_sampled_coord_groups[index]
         selected_sampled_indices = torch.randint(0, pre_sampled_coord.shape[0], (self.pre_sampled_batch_size,), device=pre_sampled_coord.device)
-        return self.siren_weights[index].flatten(), self.light_dirs[index], self.pre_sampled_coord_groups[index][selected_sampled_indices], self.pre_sampled_value_groups[index][selected_sampled_indices]
+        return self.siren_weights[index].flatten(), self.cond_inputs[index], self.pre_sampled_coord_groups[index][selected_sampled_indices], self.pre_sampled_value_groups[index][selected_sampled_indices]
 
     def __len__(self):
         return self.n_params
     
-    def get_all_light_dirs(self):
-        return self.light_dirs
+    def get_all_cond_inputs(self):
+        return self.cond_inputs

@@ -328,8 +328,8 @@ class SirenWeightDataset(Dataset):
         self.siren_weights = torch.stack(self.siren_weights, dim=0)
         
         # statistics before any standardization
-        self.std = self.siren_weights.std()
-        self.mean = self.siren_weights.mean()
+        self.std = self.siren_weights.std().item()
+        self.mean = self.siren_weights.mean().item()
         
         token_means = []
         token_stds = []
@@ -339,8 +339,9 @@ class SirenWeightDataset(Dataset):
             start = token_offsets[idx]
             end = token_offsets[idx + 1]
             this_token = self.siren_weights[:, start:end]
-            token_means.append(this_token.mean())
-            token_stds.append(this_token.std())
+            # storing as plain python number (by adding .item()), so no need to worry about device of tensors
+            token_means.append(this_token.mean().item())
+            token_stds.append(this_token.std().item())
             if standardize:
                 self.siren_weights[:, start:end] = (this_token - this_token.mean()) / (this_token.std() + 0.0000000001)
         

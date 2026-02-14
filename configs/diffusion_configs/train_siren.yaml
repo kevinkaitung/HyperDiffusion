@@ -35,7 +35,7 @@ sampling: ddpm
 lr: 0.0002
 batch_size: 256
 accumulate_grad_batches: 1
-standardize: False
+standardize: True
 val:
   num_points: 2048
   num_samples: 60
@@ -65,4 +65,4 @@ transformer_config:
     n_head: 16
     split_policy: layer_by_layer
     use_global_residual: False
-    condition: 'no'
+    condition: 'light'

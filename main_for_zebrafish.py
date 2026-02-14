@@ -46,7 +46,8 @@ def main(cfg: DictConfig):
     #     mlp_kwargs = Config.config["mlp_config"]["params"]
 
     # load pre-trained weights
-    pretrained_weights = torch.load("/home/kctung/Projects/HyperDiffusion/logs/VAE_on_zebrafish_shadows/20251025-111249/latent_triplanes.pt")
+    # pretrained_weights = torch.load("/home/kctung/Projects/HyperDiffusion/logs/VAE_on_zebrafish_shadows/20251025-111249/latent_triplanes.pt")
+    pretrained_weights = torch.load("/home/kctung/BlockFusion/logs/VAE_on_zebrafish_shadows/20251025-111249/latent_triplanes.pt")
 
     wandb.init(
         project="hyperdiffusion",

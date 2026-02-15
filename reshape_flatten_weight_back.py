@@ -13,6 +13,27 @@ def reshape_weight_back(input, example_network):
             offset += v.numel()
     return layers
 
+def reshape_weight_back_all(all_flatten_weights, n_instances, example_network):
+    net_state_dict = dict()
+    layer_keys = []
+    token_offsets = []
+    token_shapes = []
+    offset = 0
+    for k, v in example_network.items():
+        if k.startswith('0.'):
+            idx_str, layer_name = k.split(".", 1)
+            layer_keys.append(layer_name)
+            token_offsets.append(offset)
+            offset += example_network[k].numel()
+            token_shapes.append(example_network[k].shape)
+    token_offsets.append(offset)
+    
+    for idx in range(n_instances):
+        for j, layer_key in enumerate(layer_keys):
+            net_state_dict[f"{idx}.{layer_key}"] = all_flatten_weights[idx][token_offsets[j]:token_offsets[j + 1]].reshape(token_shapes[j])
+
+    return net_state_dict
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--flatten_weight_file_path", type=str)
@@ -26,8 +47,16 @@ if __name__ == "__main__":
     # sample_model = torch.load(args.sample_model_path)
     sample_model = torch.load("/home/kctung/Projects/HyperDiffusion/logs/siren_uncond_diffusion_256/20260106-214220/sample_siren.pt")
     
+    ### section to convert only 1 instance
     # use the first sample in the input (flatten weight)
-    reshape_weight = reshape_weight_back(flatten_weight[0], sample_model['net_state_dict'])
+    # reshape_weight = reshape_weight_back(flatten_weight[0], sample_model['net_state_dict'])
+    ### section end
+    
+    ### section to convert all instances
+    n_instances = len(flatten_weight)
+    assert n_instances == len(loaded_model['light_dir_cartesian'])
+
+    reshape_weight = reshape_weight_back_all(flatten_weight, n_instances, sample_model['net_state_dict'])
     
     save_model = dict()
     save_model['net_state_dict'] = reshape_weight
@@ -35,7 +64,8 @@ if __name__ == "__main__":
     # save_model['light_dir_cartesian'] = [[0.5, 0.5, 0.5]]
     # save_model['light_dir_spherical'] = [[0.5, 0.5]]
     # if having real light directions, put them
-    save_model['light_dir_cartesian'] = loaded_model['light_dir_cartesian'][0:1]
+    # save_model['light_dir_cartesian'] = loaded_model['light_dir_cartesian'][0:1]
+    save_model['light_dir_cartesian'] = loaded_model['light_dir_cartesian']
     # save_model['light_dir_spherical'] = [[0.5, 0.5]]
     # import pdb; pdb.set_trace()
     

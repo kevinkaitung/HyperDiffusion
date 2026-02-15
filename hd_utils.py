@@ -1,9 +1,9 @@
 from math import ceil
 
 import numpy as np
-import pyrender
+# import pyrender
 import torch
-import trimesh
+# import trimesh
 
 from mlp_models import MLP, MLP3D
 from Pointnet_Pointnet2_pytorch.log.classification.pointnet2_ssg_wo_normals import \
@@ -98,42 +98,42 @@ def render_meshes(meshes):
     return out_imgs
 
 
-def render_mesh(obj):
-    if isinstance(obj, trimesh.Trimesh):
-        # Handle mesh rendering
-        mesh = pyrender.Mesh.from_trimesh(
-            obj,
-            material=pyrender.MetallicRoughnessMaterial(
-                alphaMode="BLEND",
-                baseColorFactor=[1, 0.3, 0.3, 1.0],
-                metallicFactor=0.2,
-                roughnessFactor=0.8,
-            ),
-        )
-    else:
-        # Handle point cloud rendering, (converting it into a mesh instance)
-        pts = obj
-        sm = trimesh.creation.uv_sphere(radius=0.01)
-        sm.visual.vertex_colors = [1.0, 0.0, 0.0]
-        tfs = np.tile(np.eye(4), (len(pts), 1, 1))
-        tfs[:, :3, 3] = pts
-        mesh = pyrender.Mesh.from_trimesh(sm, poses=tfs)
+# def render_mesh(obj):
+#     if isinstance(obj, trimesh.Trimesh):
+#         # Handle mesh rendering
+#         mesh = pyrender.Mesh.from_trimesh(
+#             obj,
+#             material=pyrender.MetallicRoughnessMaterial(
+#                 alphaMode="BLEND",
+#                 baseColorFactor=[1, 0.3, 0.3, 1.0],
+#                 metallicFactor=0.2,
+#                 roughnessFactor=0.8,
+#             ),
+#         )
+#     else:
+#         # Handle point cloud rendering, (converting it into a mesh instance)
+#         pts = obj
+#         sm = trimesh.creation.uv_sphere(radius=0.01)
+#         sm.visual.vertex_colors = [1.0, 0.0, 0.0]
+#         tfs = np.tile(np.eye(4), (len(pts), 1, 1))
+#         tfs[:, :3, 3] = pts
+#         mesh = pyrender.Mesh.from_trimesh(sm, poses=tfs)
 
-    scene = pyrender.Scene()
-    scene.add(mesh)
-    camera = pyrender.PerspectiveCamera(yfov=np.pi / 3.0, aspectRatio=1.0)
-    eye = np.array([2, 1.4, -2])
-    target = np.array([0, 0, 0])
-    up = np.array([0, 1, 0])
+#     scene = pyrender.Scene()
+#     scene.add(mesh)
+#     camera = pyrender.PerspectiveCamera(yfov=np.pi / 3.0, aspectRatio=1.0)
+#     eye = np.array([2, 1.4, -2])
+#     target = np.array([0, 0, 0])
+#     up = np.array([0, 1, 0])
 
-    camera_pose = look_at(eye, target, up)
-    scene.add(camera, pose=camera_pose)
-    light = pyrender.DirectionalLight(color=[1, 1, 1], intensity=1e3)
-    scene.add(light, pose=camera_pose)
-    r = pyrender.OffscreenRenderer(800, 800)
-    color, depth = r.render(scene)
-    r.delete()
-    return color, depth
+#     camera_pose = look_at(eye, target, up)
+#     scene.add(camera, pose=camera_pose)
+#     light = pyrender.DirectionalLight(color=[1, 1, 1], intensity=1e3)
+#     scene.add(light, pose=camera_pose)
+#     r = pyrender.OffscreenRenderer(800, 800)
+#     color, depth = r.render(scene)
+#     r.delete()
+#     return color, depth
 
 
 # Calculate look-at matrix for rendering

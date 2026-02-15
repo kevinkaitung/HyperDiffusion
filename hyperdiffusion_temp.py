@@ -4,20 +4,21 @@ import os
 import numpy as np
 import pytorch_lightning as pl
 import torch
-import trimesh
-from pytorch_lightning.utilities.types import EPOCH_OUTPUT
+# import trimesh
+# from pytorch_lightning.utilities.types import EPOCH_OUTPUT
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
 import wandb
 from diffusion.gaussian_diffusion import (GaussianDiffusion, LossType,
                                           ModelMeanType, ModelVarType)
-from evaluation_metrics_3d import compute_all_metrics, compute_all_metrics_4d
+# from evaluation_metrics_3d import compute_all_metrics, compute_all_metrics_4d
 from hd_utils import (Config, calculate_fid_3d, generate_mlp_from_weights,
-                      render_mesh, render_meshes)
-from siren import sdf_meshing
-from siren.dataio import anime_read
-from siren.experiment_scripts.test_sdf import SDFDecoder
+                    #   render_mesh, render_meshes
+                      )
+# from siren import sdf_meshing
+# from siren.dataio import anime_read
+# from siren.experiment_scripts.test_sdf import SDFDecoder
 
 import matplotlib.pyplot as plt
 
@@ -199,6 +200,7 @@ class HyperDiffusion(pl.LightningModule):
         self.log("geometry_loss", loss_terms["geometry_loss"].mean())
 
         loss = loss_mse
+        self.log("epoch_loss", loss, on_step=False, on_epoch=True)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
@@ -217,9 +219,9 @@ class HyperDiffusion(pl.LightningModule):
     #     for metric_name in metrics:
     #         self.log("val/" + metric_name, metrics[metric_name])
 
-    def training_epoch_end(self, outputs: EPOCH_OUTPUT) -> None:
-        epoch_loss = sum(output["loss"] for output in outputs) / len(outputs)
-        self.log("epoch_loss", epoch_loss)
+    # def training_epoch_end(self, outputs: EPOCH_OUTPUT) -> None:
+        # epoch_loss = sum(output["loss"] for output in outputs) / len(outputs)
+        # self.log("epoch_loss", epoch_loss)
 
         # # Handle 3D/4D sample generation
         # if self.method == "hyper_3d":

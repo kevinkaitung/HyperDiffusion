@@ -311,7 +311,7 @@ def main(cfg: DictConfig):
         devices=torch.cuda.device_count(),
         max_epochs=Config.get("epochs"),
         # strategy="ddp",
-        strategy="dp",
+        strategy="ddp",
         logger=tensorboard_writer,
         default_root_dir=checkpoint_path,
         callbacks=[

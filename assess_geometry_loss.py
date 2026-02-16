@@ -109,12 +109,12 @@ class GeometryLossEvaluator:
     def __init__(self, model_layer_keys, model_layer_shapes, element_offsets, training_batch_size, 
                  token_means=None, token_stds=None, is_standardized=False):
         #HACK: currently hard code the hyperparameters for NeurCompNet as I only work on this set of config now
-        nets = [
-            NeurCompNet(n_input_dims=3, n_output_dims=1, bias=False, n_hidden_layers=4, n_neurons=128, is_residual=True)
-            for _ in range(training_batch_size)]
+        # nets = [
+        #     NeurCompNet(n_input_dims=3, n_output_dims=1, bias=False, n_hidden_layers=4, n_neurons=128, is_residual=True)
+        #     for _ in range(training_batch_size)]
         # no need to convert nets as nn.ModuleList if performing vmap
         # self.nets = nn.ModuleList(nets)
-        self.nets = nets
+        self.net_template = NeurCompNet(n_input_dims=3, n_output_dims=1, bias=False, n_hidden_layers=4, n_neurons=128, is_residual=True)
         self.model_layer_keys = model_layer_keys
         self.model_layer_shapes = model_layer_shapes
         self.element_offsets = element_offsets
@@ -125,12 +125,14 @@ class GeometryLossEvaluator:
         self.is_standardized = is_standardized
         
         # NOTE: freeze the weight for evaluating geometry loss
-        for net in self.nets:
-            for p in net.parameters():
-                p.requires_grad = False
-            net.eval()
-
+        # for net in self.nets:
+        #     for p in net.parameters():
+        #         p.requires_grad = False
         # self.nets.eval()
+        
+        for p in self.net_template.parameters():
+            p.requires_grad = False
+        self.net_template.eval()
         
     # NOTE: load_state_dict might break computational graph -> fail to pass gradients back into diffusion model
     # def load_params_to_siren_model(self, flatten_siren_weights):
@@ -223,13 +225,13 @@ class GeometryLossEvaluator:
         # Batched params built from diffusion output — graph intact ✓
         batched_params = self.build_batched_params(flatten_siren_weights)
 
-        # Use nets[0] as the "template" architecture for functional_call
+        # Use net_template as the "template" architecture for functional_call
         # vmap will automatically unbatch params along dim=0 per call
         # HACK: because my pytorch is too old, need to install functorch to load vmap
         # and load functional_call with very old namespace (torch.nn.utils.stateless)
         # TODO: upgrade Pytorch later
         def single_forward(params, x):
-            return torch.nn.utils.stateless.functional_call(self.nets[0], params, x)
+            return torch.nn.utils.stateless.functional_call(self.net_template, params, x)
 
         batched_output = functorch.vmap(single_forward)(batched_params, coords)
         # batched_output: (batch, N, 1)

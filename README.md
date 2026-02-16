@@ -94,6 +94,15 @@ My own case (new version)
 # overwrite any parameters you want to change
 python main_for_my_siren.py --config-name=train_siren siren_path=/home/kctung/Projects/BlockFusion/logs/SIREN_overfitting_mechhand_256/20260114-164549/pure_siren_model_permuted.pt expname=test_log transformer_config.params.n_embd=1440
 ```
+#### Resume Training
+My own case
+```commandline
+# set model_resume_path to desired checkpoint path
+# must set epochs to new #epoch for training
+
+WORKING_DIR=logs/cond_diff_zebrafish_2000_verify_geo_loss/2026-02-13_00-52-29
+python main_for_my_siren.py --config-dir=${WORKING_DIR}/.hydra --config-name=config hydra.run.dir=${WORKING_DIR} model_resume_path=${WORKING_DIR}/last.ckpt epochs=8000
+```
 To start training, airplane category:
 ```commandline
 python main.py --config-name=train_plane

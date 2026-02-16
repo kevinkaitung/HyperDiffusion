@@ -19,10 +19,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader, random_split
 
-import wandb
 from transformer import Transformer
-
-sys.path.append("siren")
 
 from temp_exps_helper import calculate_siren_weights_n_parameters
 from assess_geometry_loss import GeometryLossEvaluator
@@ -42,11 +39,9 @@ def main(cfg: DictConfig):
     rand_seed = Config.get("rand_seed")
     pl.seed_everything(rand_seed, workers=True)
 
-    # My note: is this used for generate mesh?
-    # I might not need this
-    # # In HyperDiffusion, we need to know the specifications of MLPs that are used for overfitting
-    # if "hyper" in method:
-    #     mlp_kwargs = Config.config["mlp_config"]["params"]
+    # TODO: can pass my SIREN model config here later
+    # so, I don't need to hard code model config
+    # mlp_kwargs = Config.config["mlp_config"]["params"]
 
     # load pre-trained weights
     loaded_model = torch.load(Config.get("siren_path"), map_location="cpu")
@@ -62,180 +57,47 @@ def main(cfg: DictConfig):
         # run_dir = config.run_dir
         #TODO: double check if it's necessary to create tensorboard logger again for evaluation stage
         tensorboard_writer = None
-    
-    # wandb.init(
-    #     project="hyperdiffusion",
-    #     dir=config["tensorboard_log_dir"],
-    #     settings=wandb.Settings(_disable_stats=True, _disable_meta=True),
-    #     tags=[Config.get("mode")],
-    #     mode="disabled" if Config.get("disable_wandb") else "online",
-    #     config=dict(config),
-    # )
-
-    # wandb_logger = WandbLogger()
-    # wandb_logger.log_text("config", ["config"], [[str(config)]])
-    # print("wandb", wandb.run.name, wandb.run.id)
 
     train_dt = val_dt = test_dt = None
 
-    # Although it says train, it includes all the shapes but we only extract training ones in WeightDataset
-    # My note: in my case, sets of pre-trained weights are in a single .pth file
-    mlps_folder_train = Config.get("mlps_folder_train")
-
     # Initialize Transformer for HyperDiffusion
-    if "hyper" in method:
-        # mlp = get_mlp(mlp_kwargs)
-        # state_dict = mlp.state_dict()
-        # layers = []
-        # layer_names = []
-        # for l in state_dict:
-        #     shape = state_dict[l].shape
-        #     layers.append(np.prod(shape))
-        #     layer_names.append(l)
-        # layers and layer_names would be the parameters of hash encoding
-        # layers, layer_names = calculate_encoder_n_parameters_by_level(model_config=pretrained_weights["model_state_dict"])
-        # layers, layer_names, n_params_mlp = calculate_mlp_n_parameters(
-        #     model_config=pretrained_weights["model_state_dict"]
-        # )
-        # assert n_params_mlp == pretrained_weights["model_state_dict"]["weights0"].shape[0]
-        layers, layer_names = calculate_siren_weights_n_parameters(loaded_model)
-        print(f"layers: {layers}, layer_names: {layer_names}")
-        model = Transformer(
-            layers, layer_names, **Config.config["transformer_config"]["params"]
-        ).cuda()
-    # # Initialize UNet for Voxel baseline
-    # else:
-    #     model = ldm.ldm.modules.diffusionmodules.openaimodel.UNetModel(
-    #         **Config.config["unet_config"]["params"]
-    #     ).float()
-
-    # we use our own pre-trained data, no need this section of code
-    # dataset_path = os.path.join(Config.config["dataset_dir"], Config.config["dataset"])
-    # train_object_names = np.genfromtxt(
-    #     os.path.join(dataset_path, "train_split.lst"), dtype="str"
-    # )
-    # if not cfg.mlp_config.params.move:
-    #     train_object_names = set([str.split(".")[0] for str in train_object_names])
-    # Check if dataset folder already has train,test,val split; create otherwise.
-    if method == "hyper_3d":
-        # mlps_folder_all = mlps_folder_train
-        # all_object_names = np.array(
-        #     [obj for obj in os.listdir(dataset_path) if ".lst" not in obj]
-        # )
-        # total_size = len(all_object_names)
-        # val_size = int(total_size * 0.05)
-        # test_size = int(total_size * 0.15)
-        # train_size = total_size - val_size - test_size
-        # if not os.path.exists(os.path.join(dataset_path, "train_split.lst")):
-        #     train_idx = np.random.choice(
-        #         total_size, train_size + val_size, replace=False
-        #     )
-        #     test_idx = set(range(total_size)).difference(train_idx)
-        #     val_idx = set(np.random.choice(train_idx, val_size, replace=False))
-        #     train_idx = set(train_idx).difference(val_idx)
-        #     print(
-        #         "Generating new partition",
-        #         len(train_idx),
-        #         train_size,
-        #         len(val_idx),
-        #         val_size,
-        #         len(test_idx),
-        #         test_size,
-        #     )
-
-        #     # Sanity checking the train, val and test splits
-        #     assert len(train_idx.intersection(val_idx.intersection(test_idx))) == 0
-        #     assert len(train_idx.union(val_idx.union(test_idx))) == total_size
-        #     assert (
-        #         len(train_idx) == train_size
-        #         and len(val_idx) == val_size
-        #         and len(test_idx) == test_size
-        #     )
-
-        #     np.savetxt(
-        #         os.path.join(dataset_path, "train_split.lst"),
-        #         all_object_names[list(train_idx)],
-        #         delimiter=" ",
-        #         fmt="%s",
-        #     )
-        #     np.savetxt(
-        #         os.path.join(dataset_path, "val_split.lst"),
-        #         all_object_names[list(val_idx)],
-        #         delimiter=" ",
-        #         fmt="%s",
-        #     )
-        #     np.savetxt(
-        #         os.path.join(dataset_path, "test_split.lst"),
-        #         all_object_names[list(test_idx)],
-        #         delimiter=" ",
-        #         fmt="%s",
-        #     )
-
-        # val_object_names = np.genfromtxt(
-        #     os.path.join(dataset_path, "val_split.lst"), dtype="str"
-        # )
-        # val_object_names = set([str.split(".")[0] for str in val_object_names])
-        # test_object_names = np.genfromtxt(
-        #     os.path.join(dataset_path, "test_split.lst"), dtype="str"
-        # )
-        # test_object_names = set([str.split(".")[0] for str in test_object_names])
-        # # assert len(train_object_names) == train_size, f"{len(train_object_names)} {train_size}"
-
-        if cfg.transformer_config.params.condition == "light":
-            cond_inputs = loaded_model["light_dir_cartesian"]
-        elif cfg.transformer_config.params.condition == "volume_timestep":
-            cond_inputs = loaded_model["timesteps"]
+    layers, layer_names = calculate_siren_weights_n_parameters(loaded_model)
+    print(f"layers: {layers}, layer_names: {layer_names}")
+    model = Transformer(
+        layers, layer_names, **Config.config["transformer_config"]["params"]
+    ).cuda()
 
 
-        train_dt = SirenWeightDataset(
-            loaded_model["net_state_dict"],
-            cond_inputs,
-            model.dims,
-            cfg,
-            standardize=Config.get("standardize"),
-            pre_sampled_coord_groups=loaded_model["pre_sampled_coord_groups"],
-            pre_sampled_value_groups=loaded_model["pre_sampled_value_groups"]
-        )
-        train_dl = DataLoader(
-            train_dt,
-            batch_size=Config.get("batch_size"),
-            shuffle=True,
-            drop_last=True,
-        )
-        
-        # TODO: be aware of the batch size passed in (might not work for dist training now)
-        geometry_loss_evaluator = GeometryLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets, Config.get("batch_size"), train_dt.token_means, train_dt.token_stds, Config.get("standardize"))
-        # normalize with std of all siren weights (just for experiment)
-        # cfg.normalization_factor = (1.0 / (train_dt.std)).item()
-        # val_dt = WeightDataset(
-        #     mlps_folder_train,
-        #     wandb_logger,
-        #     model.dims,
-        #     mlp_kwargs,
-        #     cfg,
-        #     val_object_names,
-        # )
-        # test_dt = WeightDataset(
-        #     mlps_folder_train,
-        #     wandb_logger,
-        #     model.dims,
-        #     mlp_kwargs,
-        #     cfg,
-        #     test_object_names,
-        # )
-    # elif method == "raw_3d":
-    #     dataset_path = os.path.join(
-    #         Config.config["dataset_dir"], Config.config["dataset"]
-    #     )
-    #     train_dt = VoxelDataset(
-    #         dataset_path, wandb_logger, model.dims, mlp_kwargs, cfg, train_object_names
-    #     )
-    #     train_dl = DataLoader(
-    #         train_dt, batch_size=Config.get("batch_size"), shuffle=True, num_workers=2
-    #     )
+    if cfg.transformer_config.params.condition == "light":
+        cond_inputs = loaded_model["light_dir_cartesian"]
+    elif cfg.transformer_config.params.condition == "volume_timestep":
+        cond_inputs = loaded_model["timesteps"]
 
-    # These two dl's are just placeholders, during val and test evaluation we are looking at test_split.lst,
-    # val_split.lst files, inside calc_metrics methods
+
+    train_dt = SirenWeightDataset(
+        loaded_model["net_state_dict"],
+        cond_inputs,
+        model.dims,
+        cfg,
+        standardize=Config.get("standardize"),
+        pre_sampled_coord_groups=loaded_model["pre_sampled_coord_groups"],
+        pre_sampled_value_groups=loaded_model["pre_sampled_value_groups"]
+    )
+    train_dl = DataLoader(
+        train_dt,
+        batch_size=Config.get("batch_size"),
+        shuffle=True,
+        drop_last=True,
+    )
+    
+    # TODO: be aware of the batch size passed in (might not work for dist training now)
+    geometry_loss_evaluator = GeometryLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets, Config.get("batch_size"), train_dt.token_means, train_dt.token_stds, Config.get("standardize"))
+    # normalize with std of all siren weights (just for experiment)
+    # cfg.normalization_factor = (1.0 / (train_dt.std)).item()
+
+    # These two dl's are just placeholders
+    # currently, we don't prepare val and test SIREN weights for evaluation
+    # TODO: might need to prepare later for better evaluation on unseen lighting directions
     val_dl = DataLoader(
         torch.utils.data.Subset(train_dt, [0]), batch_size=1, shuffle=False
     )
@@ -253,7 +115,7 @@ def main(cfg: DictConfig):
             len(train_dt)
         )
     )
-    # dataloader would return a tuple of 2 elements (weights, light directions)
+    # dataloader would return a tuple of 4 elements (weights, light directions/volume timesteps, presampled coords, presampled values)
     input_data = next(iter(train_dl))
     print(
         "Input data shape, min, max:",
@@ -261,7 +123,6 @@ def main(cfg: DictConfig):
         input_data[0].min(),
         input_data[0].max(),
     )
-    # print(f"Light Direction: {input_data[1]}")
 
     best_model_save_path = Config.get("best_model_save_path")
     model_resume_path = Config.get("model_resume_path")
@@ -310,7 +171,7 @@ def main(cfg: DictConfig):
         accelerator="gpu",
         devices=torch.cuda.device_count(),
         max_epochs=Config.get("epochs"),
-        # strategy="ddp",
+        # new version of Pytorch Lightning only support ddp (not dp)
         strategy="ddp",
         logger=tensorboard_writer,
         default_root_dir=checkpoint_path,
@@ -326,7 +187,7 @@ def main(cfg: DictConfig):
     if Config.get("mode") == "train":
         # If model_resume_path is provided (i.e., not None), the training will continue from that checkpoint
         trainer.fit(diffuser, train_dl, val_dl, ckpt_path=model_resume_path)
-    # # best_model_save_path is the path to saved best model
+    # best_model_save_path is the path to saved best model
     trainer.test(
         diffuser,
         test_dl,

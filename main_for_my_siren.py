@@ -169,10 +169,18 @@ def main(cfg: DictConfig):
     lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval="epoch")
     trainer = pl.Trainer(
         accelerator="gpu",
-        devices=torch.cuda.device_count(),
         max_epochs=Config.get("epochs"),
+        # NOTE: currently distributed training is not fully supported
+        # TODO: tasks to fully support ddp
+        # 1. revise test and validation step to support distributed training
+        # (either let 1 gpu do the test/validation or distribute them to all available gpus)
+        # 2. make sure all tensors used in training, validation, etc. are placed on the proper devices at right time
+        # 3. test the finished pipeline
         # new version of Pytorch Lightning only support ddp (not dp)
-        strategy="ddp",
+        # strategy="ddp",
+        # devices=torch.cuda.device_count(),
+        # NOTE: use a single GPU for training now
+        devices=1,
         logger=tensorboard_writer,
         default_root_dir=checkpoint_path,
         callbacks=[

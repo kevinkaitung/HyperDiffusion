@@ -50,7 +50,7 @@ def main(cfg: DictConfig):
         # get the hydra log directory
         run_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
         # create tensorboard logger
-        tensorboard_writer = TensorBoardLogger(save_dir=run_dir)
+        tensorboard_writer = TensorBoardLogger(save_dir=run_dir, version=0)
     elif Config.get("mode") == "test":
         run_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
         # NOTE: for testing ckpt generated before refactoring the code

@@ -45,7 +45,7 @@ if __name__ == "__main__":
     loaded_model = torch.load(args.flatten_weight_file_path)
     flatten_weight = loaded_model['generated_weights_samples']
     # sample_model = torch.load(args.sample_model_path)
-    sample_model = torch.load("/home/kctung/Projects/HyperDiffusion/logs/siren_uncond_diffusion_256/20260106-214220/sample_siren.pt")
+    sample_model = torch.load("/home/kctung/Projects/HyperDiffusion/logs/cond_diff_zebrafish_2000_verify_geo_loss/2026-02-13_00-52-29/sample_siren_7000_test.pt")
     
     ### section to convert only 1 instance
     # use the first sample in the input (flatten weight)

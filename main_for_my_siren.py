@@ -1,6 +1,6 @@
 import os
 
-from dataset import SirenWeightDataset
+from dataset import SirenWeightDataset, TemporalSirenWeightDataset
 from hd_utils import Config, get_mlp
 from hyperdiffusion_temp import HyperDiffusion
 
@@ -72,17 +72,30 @@ def main(cfg: DictConfig):
         cond_inputs = loaded_model["light_dir_cartesian"]
     elif cfg.transformer_config.params.condition == "volume_timestep":
         cond_inputs = loaded_model["timesteps"]
+    elif cfg.transformer_config.params.condition == "prev_volume_weight":
+        cond_inputs = loaded_model["timesteps"]
 
 
-    train_dt = SirenWeightDataset(
-        loaded_model["net_state_dict"],
-        cond_inputs,
-        model.dims,
-        cfg,
-        standardize=Config.get("standardize"),
-        pre_sampled_coord_groups=loaded_model["pre_sampled_coord_groups"],
-        pre_sampled_value_groups=loaded_model["pre_sampled_value_groups"]
-    )
+    if cfg.transformer_config.params.condition == "prev_volume_weight":
+        train_dt = TemporalSirenWeightDataset(
+            loaded_model["net_state_dict"],
+            cond_inputs,
+            model.dims,
+            cfg,
+            standardize=Config.get("standardize"),
+            pre_sampled_coord_groups=loaded_model["pre_sampled_coord_groups"],
+            pre_sampled_value_groups=loaded_model["pre_sampled_value_groups"]
+        )
+    else:
+        train_dt = SirenWeightDataset(
+            loaded_model["net_state_dict"],
+            cond_inputs,
+            model.dims,
+            cfg,
+            standardize=Config.get("standardize"),
+            pre_sampled_coord_groups=loaded_model["pre_sampled_coord_groups"],
+            pre_sampled_value_groups=loaded_model["pre_sampled_value_groups"]
+        )
     train_dl = DataLoader(
         train_dt,
         batch_size=Config.get("batch_size"),

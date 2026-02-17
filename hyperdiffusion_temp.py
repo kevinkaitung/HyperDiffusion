@@ -246,8 +246,8 @@ class HyperDiffusion(pl.LightningModule):
         # HACK: should use same set of light direction if doing validation (as I use same noise for all validation step)
         # but currently doesn't incorporate conditioning, just leave the code here
         train_set_cond_inputs = self.train_dt.get_all_cond_inputs()
-        idx = torch.randperm(train_set_cond_inputs.shape[0])[:num_samples]
-        selected_cond_inputs = train_set_cond_inputs[idx]
+        selected_idx = torch.randperm(train_set_cond_inputs.shape[0])[:num_samples]
+        selected_cond_inputs = train_set_cond_inputs[selected_idx]
         model_kwargs = {
             "cond_input": selected_cond_inputs
         }
@@ -292,6 +292,9 @@ class HyperDiffusion(pl.LightningModule):
             torch.save({"generated_weights_samples": x_0s, "light_dir_cartesian": selected_cond_inputs.tolist()}, save_dir)
         elif self.condition_type == "volume_timestep":
             torch.save({"generated_weights_samples": x_0s, "timesteps": selected_cond_inputs.tolist()}, save_dir)
+        elif self.condition_type == "prev_volume_weight":
+            # TODO: see if I really need to store the actual cond input
+            torch.save({"generated_weights_samples": x_0s, "timesteps": self.train_dt.get_all_temporal_indices()[selected_idx].tolist()}, save_dir)
         return mean_PSNR, mean_cosine_similarity
 
     def test_step(self, *args, **kwargs):

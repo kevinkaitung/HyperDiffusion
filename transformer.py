@@ -431,7 +431,7 @@ class Transformer(nn.Module):
         predict_xstart=True,  # if True, G.pt predicts signal (False = predict noise)
         absolute_loss_conditioning=False,  # if True, adds two extra input tokens indicating starting/target metrics
         use_global_residual=False,
-        condition="no", # accept condition types: "light", "volume_timestep"
+        condition="no", # accept condition types: "light", "volume_timestep", "prev_volume_weight"
         condition_n_points=0,
         **gpt_kwargs,  # Arguments for the Transformer model (depth, heads, etc.)
     ):
@@ -460,6 +460,8 @@ class Transformer(nn.Module):
             self.condition_embedder = FourierEmbedder(num_freqs=num_frequencies)
         elif condition == "volume_timestep":
             self.condition_embedder = FrequencyEmbedder(num_frequencies, max_freq_log2)
+        elif condition == "prev_volume_weight":
+            self.condition_embedder = None
 
         # Initialize with identity output:
         if self.use_global_residual:
@@ -512,6 +514,11 @@ class Transformer(nn.Module):
             scalar_token_size_volume_timestep = [self.get_scalar_token_size(num_frequencies)]
             input_parameter_sizes.extend([scalar_token_size_volume_timestep])
             input_parameter_names.extend(["volume_timestep_embedding"])
+        elif condition_type == "prev_volume_weight":
+            # use prev timestep SIREN as conditioning
+            # just extending it same as input tokens
+            input_parameter_sizes.extend([deepcopy(parameter_sizes)])
+            input_parameter_names.extend(deepcopy(parameter_names))
         return input_parameter_sizes, output_parameter_sizes, input_parameter_names
 
     def configure_optimizers(self, lr, wd, betas):
@@ -544,6 +551,7 @@ class Transformer(nn.Module):
         cond_input can be:
             1. light_dirs: (N, 3) tensor of light directions (cartesian coordinates)
             2. volume_timestep: (N, 1) tensor of volume timestep
+            3. prev_volume_weight: (N, #SIREN weights length) tensor of previous timestep volume's siren weights
         loss_target: (N, 1) tensor, the prompted (desired) loss/error/return
         loss_prev: (N, 1) tensor, loss/error/return obtained by x_prev
         x_prev: (N, D) tensor of starting parameters that are being updated
@@ -552,7 +560,11 @@ class Transformer(nn.Module):
         ----------------------------------------------
         """
         t_embedding = self.scalar_embedder(t)
-        cond_embedding = self.condition_embedder(cond_input)
+        if self.condition_embedder is not None:
+            cond_embedding = self.condition_embedder(cond_input)
+        else:
+            # case for prev_volume_weight conditioning 
+            cond_embedding = cond_input
         # loss_embedding = self.embed_loss(loss_target, loss_prev)
         if self.use_global_residual:
             x_prev = x_prev.unsqueeze(0).repeat((len(x), 1))

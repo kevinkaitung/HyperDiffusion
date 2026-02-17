@@ -323,7 +323,7 @@ class SirenWeightDataset(Dataset):
         # create a unified tensor for all instances    
         # 2D (#instances, flatten weights for all layers)
         self.siren_weights = []
-        self.cond_inputs = torch.tensor(cond_inputs).cuda()
+        self.cond_inputs = torch.tensor(cond_inputs).cuda() if cond_inputs is not None else None
         
         temp = []
         for idx in range(n_instances):
@@ -383,3 +383,30 @@ class SirenWeightDataset(Dataset):
     
     def get_all_cond_inputs(self):
         return self.cond_inputs
+    
+class TemporalSirenWeightDataset(SirenWeightDataset):
+    def __init__(
+        self, siren_weights, cond_inputs, model_dims, cfg, standardize=False, pre_sampled_coord_groups=None, pre_sampled_value_groups=None
+    ):
+        super().__init__(siren_weights, None, model_dims, cfg, standardize, pre_sampled_coord_groups, pre_sampled_value_groups)
+        self.temporal_indices = cond_inputs
+        first_frame_cond_strategy = "self"
+        
+        # Overwrite self.cond_inputs using already-processed siren_weights
+        # No extra memory — just stacking views into the same tensor
+        prev_weights = []
+        for idx in self.temporal_indices:
+            # first frame as edge case:
+            if idx == 0:
+                if first_frame_cond_strategy == "zeros":
+                    prev_weights.append(torch.zeros(self.siren_weights.shape[1]))
+                elif first_frame_cond_strategy == "self":
+                    prev_weights.append(self.siren_weights[0].flatten())
+            else:
+                prev_weights.append(self.siren_weights[idx - 1].flatten())
+        
+        self.cond_inputs = torch.stack(prev_weights, dim=0).cuda()  # (n_instances, weight_dim)
+        self.temporal_indices = torch.tensor(self.temporal_indices)
+    
+    def get_all_temporal_indices(self):
+        return self.temporal_indices

@@ -50,6 +50,12 @@ class HyperDiffusion(pl.LightningModule):
         self.num_samples_for_val = 16
         self.noise_for_val = torch.randn((self.num_samples_for_val, *self.image_size[1:]))
         
+        all_train_set_cond_inputs = self.train_dt.get_all_cond_inputs()
+        self.selected_idx_for_val = torch.randperm(all_train_set_cond_inputs.shape[0])[:self.num_samples_for_val]
+        # or, give a fix set of indices for validation
+        # self.selected_idx_for_val = torch.tensor([0, 18, 50, 65, 88, 150, 180, 210, 257, 298, 314, 361, 405, 489, 502, 556])
+        self.cond_input_for_val = all_train_set_cond_inputs[self.selected_idx_for_val]
+        
         self.geometry_loss_evaluator = geometry_loss_evaluator
         self.condition_type = cfg.transformer_config.params.condition
 
@@ -137,7 +143,7 @@ class HyperDiffusion(pl.LightningModule):
         return loss
 
     def validation_step(self, val_batch, batch_idx):
-        mean_PSNR, mean_cosine_similarity = self.generate_samples(self.num_samples_for_val, self.noise_for_val, False)
+        mean_PSNR, mean_cosine_similarity = self.generate_samples(self.num_samples_for_val, self.noise_for_val, self.cond_input_for_val, False)
         self.log("val/PSNR", mean_PSNR)
         self.log("val/cosine_similarity", mean_cosine_similarity)
     
@@ -232,7 +238,7 @@ class HyperDiffusion(pl.LightningModule):
         print(f"OpenAI Coefficient: {oai_coeff}")
         
     
-    def generate_samples(self, num_samples, noise=None, is_test=False):
+    def generate_samples(self, num_samples, noise=None, cond_input=None, is_test=False):
         if noise is not None:
             assert noise.shape[0] == num_samples, (
                 "the first dim of noise (batch_size) should match num_samples"
@@ -243,16 +249,11 @@ class HyperDiffusion(pl.LightningModule):
 
         self.calculate_stats_of_train_set_data()
         
-        # randomly pick 16 train set light dirs and inference them
-        # HACK: should use same set of light direction if doing validation (as I use same noise for all validation step)
-        # but currently doesn't incorporate conditioning, just leave the code here
-        train_set_cond_inputs = self.train_dt.get_all_cond_inputs()
-        selected_idx = torch.randperm(train_set_cond_inputs.shape[0])[:num_samples]
-        selected_cond_inputs = train_set_cond_inputs[selected_idx]
+        # inference with provided conditional input
         model_kwargs = {
             # NOTE: need to manually move conditional inputs onto device
             # since we don't get them from pytroch lightning's validation_step and test_step (where it would move automatically) 
-            "cond_input": selected_cond_inputs.to(self.device)
+            "cond_input": cond_input.to(self.device)
         }
         # Then, sampling some new shapes -> outputting and rendering them
         x_0s = self.diff.ddim_sample_loop(
@@ -292,13 +293,16 @@ class HyperDiffusion(pl.LightningModule):
             save_dir = f"{self.run_dir}/generated_weights_samples_{self.current_epoch}_validation.pt"   
         # os.makedirs(save_dir, exist_ok=True)
         if self.condition_type == "light":
-            torch.save({"generated_weights_samples": x_0s, "light_dir_cartesian": selected_cond_inputs.tolist()}, save_dir)
+            torch.save({"generated_weights_samples": x_0s, "light_dir_cartesian": cond_input.tolist()}, save_dir)
         elif self.condition_type == "volume_timestep":
-            torch.save({"generated_weights_samples": x_0s, "timesteps": selected_cond_inputs.tolist()}, save_dir)
+            torch.save({"generated_weights_samples": x_0s, "timesteps": cond_input.tolist()}, save_dir)
         elif self.condition_type == "prev_volume_weight":
             # TODO: see if I really need to store the actual cond input
-            torch.save({"generated_weights_samples": x_0s, "timesteps": self.train_dt.get_all_temporal_indices()[selected_idx].tolist()}, save_dir)
+            # HACK: a little bit hacky to access selected_idx_for_val for querying temporal indices
+            # see how to improve later
+            torch.save({"generated_weights_samples": x_0s, "timesteps": self.train_dt.get_all_temporal_indices()[self.selected_idx_for_val].tolist()}, save_dir)
         return mean_PSNR, mean_cosine_similarity
 
     def test_step(self, *args, **kwargs):
-        self.generate_samples(16, is_test=True)
+        # TODO: generate noise and cond input here or recieve from user input
+        self.generate_samples(16, noise=self.noise_for_val, cond_input=self.cond_input_for_val, is_test=True)

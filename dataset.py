@@ -384,6 +384,22 @@ class SirenWeightDataset(Dataset):
     def get_all_cond_inputs(self):
         return self.cond_inputs
     
+# only used for testing_step
+# TODO: might want to extend to also recieve test set SIREN weights (if given) and consolidate with SirenWeightDataset
+# possibly for evaluation in the test step (either directly compare SIREN weights themselves or decode back to volume)
+class TestsetDataset(Dataset):
+    def __init__(
+        self, cond_inputs
+    ):
+        self.cond_inputs = torch.tensor(cond_inputs)
+        self.n_params = len(self.cond_inputs)
+    
+    def __getitem__(self, index):
+        return self.cond_inputs[index]
+    
+    def __len__(self):
+        return self.n_params
+    
 class TemporalSirenWeightDataset(SirenWeightDataset):
     def __init__(
         self, siren_weights, cond_inputs, model_dims, cfg, standardize=False, pre_sampled_coord_groups=None, pre_sampled_value_groups=None

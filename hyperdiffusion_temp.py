@@ -56,6 +56,14 @@ class HyperDiffusion(pl.LightningModule):
         # self.selected_idx_for_val = torch.tensor([0, 18, 50, 65, 88, 150, 180, 210, 257, 298, 314, 361, 405, 489, 502, 556])
         self.cond_input_for_val = all_train_set_cond_inputs[self.selected_idx_for_val]
         
+        # select some cond inputs for testing step
+        # would only be retrieved when test set cond inputs file not provided
+        self.num_samples_for_test = 16
+        self.selected_idx_for_test = torch.randperm(all_train_set_cond_inputs.shape[0])[:self.num_samples_for_test]
+        # or, give a fix set of indices for validation
+        # self.selected_idx_for_test = torch.tensor([0, 18, 50, 65, 88, 150, 180, 210, 257, 298, 314, 361, 405, 489, 502, 556])
+        self.cond_input_for_test = all_train_set_cond_inputs[self.selected_idx_for_test]
+        
         self.geometry_loss_evaluator = geometry_loss_evaluator
         self.condition_type = cfg.transformer_config.params.condition
 
@@ -289,8 +297,10 @@ class HyperDiffusion(pl.LightningModule):
         # Save generated weights samples to disk
         if is_test:
             save_dir = f"{self.run_dir}/generated_weights_samples_{self.current_epoch}_test.pt"
+            selected_idx = self.selected_idx_for_test
         else:
-            save_dir = f"{self.run_dir}/generated_weights_samples_{self.current_epoch}_validation.pt"   
+            save_dir = f"{self.run_dir}/generated_weights_samples_{self.current_epoch}_validation.pt"
+            selected_idx = self.selected_idx_for_val
         # os.makedirs(save_dir, exist_ok=True)
         if self.condition_type == "light":
             torch.save({"generated_weights_samples": x_0s, "light_dir_cartesian": cond_input.tolist()}, save_dir)
@@ -300,9 +310,10 @@ class HyperDiffusion(pl.LightningModule):
             # TODO: see if I really need to store the actual cond input
             # HACK: a little bit hacky to access selected_idx_for_val for querying temporal indices
             # see how to improve later
-            torch.save({"generated_weights_samples": x_0s, "timesteps": self.train_dt.get_all_temporal_indices()[self.selected_idx_for_val].tolist()}, save_dir)
+            torch.save({"generated_weights_samples": x_0s, "timesteps": self.train_dt.get_all_temporal_indices()[selected_idx].tolist()}, save_dir)
         return mean_PSNR, mean_cosine_similarity
 
-    def test_step(self, *args, **kwargs):
-        # TODO: generate noise and cond input here or recieve from user input
-        self.generate_samples(16, noise=self.noise_for_val, cond_input=self.cond_input_for_val, is_test=True)
+    def test_step(self, test_batch, batch_idx):
+        # self.generate_samples(16, noise=self.noise_for_val, cond_input=self.cond_input_for_val, is_test=True)
+        # TODO: need to revise for the case that multiple batches would be used in test_step
+        self.generate_samples(len(test_batch), cond_input=test_batch, is_test=True)

@@ -1,6 +1,6 @@
 import os
 
-from dataset import SirenWeightDataset, TemporalSirenWeightDataset
+from dataset import SirenWeightDataset, TemporalSirenWeightDataset, TestsetDataset
 from hd_utils import Config, get_mlp
 from hyperdiffusion_temp import HyperDiffusion
 
@@ -69,12 +69,13 @@ def main(cfg: DictConfig):
 
 
     if cfg.transformer_config.params.condition == "light":
-        cond_inputs = loaded_model["light_dir_cartesian"]
+        cond_inputs_key = "light_dir_cartesian"
     elif cfg.transformer_config.params.condition == "volume_timestep":
-        cond_inputs = loaded_model["timesteps"]
+        cond_inputs_key = "timesteps"
     elif cfg.transformer_config.params.condition == "prev_volume_weight":
-        cond_inputs = loaded_model["timesteps"]
-
+        cond_inputs_key = "timesteps"
+    cond_inputs = loaded_model[cond_inputs_key]
+    
 
     if cfg.transformer_config.params.condition == "prev_volume_weight":
         train_dt = TemporalSirenWeightDataset(
@@ -117,9 +118,6 @@ def main(cfg: DictConfig):
     val_dl = DataLoader(
         torch.utils.data.Subset(train_dt, [0]), batch_size=1, shuffle=False
     )
-    test_dl = DataLoader(
-        torch.utils.data.Subset(train_dt, [0]), batch_size=1, shuffle=False
-    )
 
     # print(
     #     "Train dataset length: {} Val dataset length: {} Test dataset length".format(
@@ -146,6 +144,18 @@ def main(cfg: DictConfig):
     # Initialize HyperDiffusion
     diffuser = HyperDiffusion(
         model, train_dt, val_dt, test_dt, mlp_kwargs, input_data[0].shape, method, cfg, run_dir, geometry_loss_evaluator
+    )
+    
+    if Config.get("test_set_cond_input_path") is not None:
+        test_set_cond_inputs = torch.load(Config.get("test_set_cond_input_path"), map_location="cpu")[cond_inputs_key]
+        # TODO: probably can organize the logic better
+        if cfg.transformer_config.params.condition == "prev_volume_weight":
+            raise NotImplementedError("currently no impl. to receive customed test set cond input of 'prev_volume_weight' conditioning")
+    else:
+        # if test set cond inputs are not provided -> randomly get some from train set
+        test_set_cond_inputs = diffuser.cond_input_for_test
+    test_dl = DataLoader(
+        TestsetDataset(cond_inputs=test_set_cond_inputs), batch_size=Config.get("batch_size"), shuffle=False
     )
 
     # # Specify where to save checkpoints

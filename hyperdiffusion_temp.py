@@ -75,15 +75,15 @@ class HyperDiffusion(pl.LightningModule):
         return optimizer
 
     def training_step(self, train_batch, batch_idx):
-        # Extract input_data (either voxel or weight) which is the first element of the tuple
-        # input_data = train_batch[0]
-        # since the their dataset would return a tuple of (weights, prev_weights)
-        # but we just return a single torch tensor of weights
+        # pytorch lightning would move train_batch to target device automatically (e.g., GPU)
+        # so at this point, the input_data is already on the target device (No need to move manually!)
         input_data = train_batch
         # At the first step output first element in the dataset as a sanit check
         if self.trainer.global_step == 0:
             print("Input images shape:", input_data[0].shape)
-            print("Lighting directions shape:", input_data[1].shape)
+            print("Conditional inputs shape:", input_data[1].shape)
+            print("Presampled coords shape:", input_data[2].shape)
+            print("Presampled values shape:", input_data[3].shape)
         
         # Output statistics every 100 step
         if self.trainer.global_step % 100 == 0:
@@ -167,8 +167,8 @@ class HyperDiffusion(pl.LightningModule):
         PSNR_list = []
         cosine_similarity_list = []
         for idx, (GT_siren_weight, light_dir, _, _) in enumerate(self.train_dt):
-            # TODO: make sure why generate_weight_1_sample and GT_siren_weight are not at the same device
-            GT_siren_weight = GT_siren_weight.to(self.device)
+            # NOTE: GT_siren_weight should be on CPU, so move to the same device as generate_weight_1_sample
+            GT_siren_weight = GT_siren_weight.to(generate_weight_1_sample.device)
             # both 'generate_weight_1_sample' and 'GT_siren_weight' should be flattened SIREN weight of 1 sample (1D tensor)
             mse = torch.nn.functional.mse_loss(generate_weight_1_sample, GT_siren_weight)
             max = GT_siren_weight.max() - GT_siren_weight.min()
@@ -237,6 +237,7 @@ class HyperDiffusion(pl.LightningModule):
             assert noise.shape[0] == num_samples, (
                 "the first dim of noise (batch_size) should match num_samples"
             )
+            # NOTE: need to manually move noise onto device
             noise = noise.to(self.device)
         
 
@@ -249,7 +250,9 @@ class HyperDiffusion(pl.LightningModule):
         selected_idx = torch.randperm(train_set_cond_inputs.shape[0])[:num_samples]
         selected_cond_inputs = train_set_cond_inputs[selected_idx]
         model_kwargs = {
-            "cond_input": selected_cond_inputs
+            # NOTE: need to manually move conditional inputs onto device
+            # since we don't get them from pytroch lightning's validation_step and test_step (where it would move automatically) 
+            "cond_input": selected_cond_inputs.to(self.device)
         }
         # Then, sampling some new shapes -> outputting and rendering them
         x_0s = self.diff.ddim_sample_loop(

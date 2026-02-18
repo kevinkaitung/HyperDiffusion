@@ -217,10 +217,17 @@ class GeometryLossEvaluator:
     def evaluate_geometry_loss(self, flatten_siren_weights,
                                 pre_sampled_coord_groups,
                                 pre_sampled_value_groups):
-        model_device = flatten_siren_weights.device
-        # set non_blocking to True -> tensors die after out of scope -> hope it can avoid OOM error
-        coords = pre_sampled_coord_groups.to(model_device, non_blocking=True).float()   # (batch, N, 3)
-        values = pre_sampled_value_groups.to(model_device, non_blocking=True).float()   # (batch, N)
+        # NOTE: this can be redundant, because presampled coords and values are already on device as flatten_siren_weights
+        # (moved by pytorch lightning during training_step)
+        # model_device = flatten_siren_weights.device
+        # # set non_blocking to True -> tensors die after out of scope -> hope it can avoid OOM error
+        # coords = pre_sampled_coord_groups.to(model_device, non_blocking=True).float()   # (batch, N, 3)
+        # values = pre_sampled_value_groups.to(model_device, non_blocking=True).float()   # (batch, N)
+        coords = pre_sampled_coord_groups
+        values = pre_sampled_value_groups
+        # sanity check
+        assert flatten_siren_weights.device == pre_sampled_coord_groups.device == pre_sampled_value_groups.device, \
+            "Device mismatch in geometry loss inputs"
 
         # Batched params built from diffusion output — graph intact ✓
         batched_params = self.build_batched_params(flatten_siren_weights)

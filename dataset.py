@@ -323,7 +323,7 @@ class SirenWeightDataset(Dataset):
         # create a unified tensor for all instances    
         # 2D (#instances, flatten weights for all layers)
         self.siren_weights = []
-        self.cond_inputs = torch.tensor(cond_inputs).cuda() if cond_inputs is not None else None
+        self.cond_inputs = torch.tensor(cond_inputs) if cond_inputs is not None else None
         
         temp = []
         for idx in range(n_instances):
@@ -405,7 +405,7 @@ class TemporalSirenWeightDataset(SirenWeightDataset):
             else:
                 prev_weights.append(self.siren_weights[idx - 1].flatten())
         
-        self.cond_inputs = torch.stack(prev_weights, dim=0).cuda()  # (n_instances, weight_dim)
+        self.cond_inputs = torch.stack(prev_weights, dim=0)  # (n_instances, weight_dim)
         self.temporal_indices = torch.tensor(self.temporal_indices)
     
     def get_all_temporal_indices(self):

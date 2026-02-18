@@ -101,6 +101,9 @@ def main(cfg: DictConfig):
         batch_size=Config.get("batch_size"),
         shuffle=True,
         drop_last=True,
+        num_workers=4,
+        pin_memory=True,          # Enables fast CPU→GPU transfer
+        persistent_workers=True
     )
     
     # TODO: be aware of the batch size passed in (might not work for dist training now)

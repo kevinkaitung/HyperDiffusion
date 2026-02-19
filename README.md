@@ -101,7 +101,7 @@ My own case
 # must set epochs to new #epoch for training
 
 WORKING_DIR=logs/cond_diff_zebrafish_2000_verify_geo_loss/2026-02-13_00-52-29
-python main_for_my_siren.py --config-dir=${WORKING_DIR}/.hydra --config-name=config hydra.run.dir=${WORKING_DIR} model_resume_path=${WORKING_DIR}/last.ckpt epochs=8000
+python main_for_my_siren.py --config-dir=${WORKING_DIR}/.hydra --config-name=config hydra.run.dir=${WORKING_DIR} model_resume_path=${WORKING_DIR}/last.ckpt epochs=8000 mode=train
 ```
 To start training, airplane category:
 ```commandline

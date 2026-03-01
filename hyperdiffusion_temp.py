@@ -296,6 +296,8 @@ class HyperDiffusion(pl.LightningModule):
         
         # Save generated weights samples to disk
         if is_test:
+            # NOTE: it seems newer pytorch lightning (On sophia) would not set current_epoch to epoch in ckpt file
+            # so, it would show epoch 0 here
             save_dir = f"{self.run_dir}/generated_weights_samples_{self.current_epoch}_test.pt"
             selected_idx = self.selected_idx_for_test
         else:

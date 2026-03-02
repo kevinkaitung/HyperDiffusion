@@ -395,7 +395,7 @@ class SirenWeightDataset(Dataset):
             selected_sampled_indices = torch.randint(0, pre_sampled_coord.shape[0], (self.pre_sampled_batch_size,), device=pre_sampled_coord.device)
             coords = self.pre_sampled_coord_groups[index][selected_sampled_indices]
             values = self.pre_sampled_value_groups[index][selected_sampled_indices]
-        else
+        else:
             # the case that geometry loss is not enabled
             coords = pre_sampled_coord                          # empty (0)
             values = self.pre_sampled_value_groups[index]       # empty (0)

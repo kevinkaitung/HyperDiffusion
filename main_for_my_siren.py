@@ -79,6 +79,16 @@ def main(cfg: DictConfig):
         cond_inputs_key = "timesteps"
     cond_inputs = loaded_model[cond_inputs_key]
     
+    if Config.get("enable_geometry_loss"):
+        pre_sampled_coord_groups = loaded_model["pre_sampled_coord_groups"]
+        pre_sampled_value_groups = loaded_model["pre_sampled_value_groups"]
+    else:
+        pre_sampled_coord_groups = None
+        pre_sampled_value_groups = None
+    if Config.get("enable_rendering_loss"):
+        pre_cal_GT_images = loaded_model["pre_cal_GT_images"]
+    else:
+        pre_cal_GT_images = None
 
     if cfg.transformer_config.params.condition == "prev_volume_weight":
         train_dt = TemporalSirenWeightDataset(
@@ -87,8 +97,8 @@ def main(cfg: DictConfig):
             model.dims,
             cfg,
             standardize=Config.get("standardize"),
-            pre_sampled_coord_groups=loaded_model["pre_sampled_coord_groups"],
-            pre_sampled_value_groups=loaded_model["pre_sampled_value_groups"]
+            pre_sampled_coord_groups=pre_sampled_coord_groups,
+            pre_sampled_value_groups=pre_sampled_value_groups
         )
     else:
         train_dt = SirenWeightDataset(
@@ -97,9 +107,9 @@ def main(cfg: DictConfig):
             model.dims,
             cfg,
             standardize=Config.get("standardize"),
-            pre_sampled_coord_groups=loaded_model["pre_sampled_coord_groups"],
-            pre_sampled_value_groups=loaded_model["pre_sampled_value_groups"],
-            pre_cal_GT_images=loaded_model["pre_cal_GT_images"]
+            pre_sampled_coord_groups=pre_sampled_coord_groups,
+            pre_sampled_value_groups=pre_sampled_value_groups,
+            pre_cal_GT_images=pre_cal_GT_images
         )
     train_dl = DataLoader(
         train_dt,
@@ -112,12 +122,19 @@ def main(cfg: DictConfig):
     )
     
     # TODO: be aware of the batch size passed in (might not work for dist training now)
-    geometry_loss_evaluator = GeometryLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets, train_dt.token_means, train_dt.token_stds, Config.get("standardize"))
-    rendering_loss_evaluator = RenderingLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets,
+    if Config.get("enable_geometry_loss"):
+        geometry_loss_evaluator = GeometryLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets, train_dt.token_means, train_dt.token_stds, Config.get("standardize"))
+    else:
+        geometry_loss_evaluator = None
+    if Config.get("enable_rendering_loss"):
+        rendering_loss_evaluator = RenderingLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets,
                                                       train_dt.token_means, train_dt.token_stds, Config.get("standardize"),
                                                       loaded_model["camera_configs"], loaded_model["aabb_configs"],
                                                       loaded_model["march_configs"], Config.get("raw_volume_file_path"),
                                                       Config.get("tfn_file_path"))
+    else:
+        rendering_loss_evaluator = None
+    
     # normalize with std of all siren weights (just for experiment)
     # cfg.normalization_factor = (1.0 / (train_dt.std)).item()
 

@@ -371,18 +371,35 @@ class SirenWeightDataset(Dataset):
         self.cfg = cfg
         
         # prepare the presample points for evaluating geometry loss (each instance should have a set of coords/scalar values pair)
-        self.pre_sampled_coord_groups = pre_sampled_coord_groups
-        self.pre_sampled_value_groups = pre_sampled_value_groups
+        if (pre_sampled_coord_groups is not None) & (pre_sampled_value_groups is not None):
+            self.pre_sampled_coord_groups = pre_sampled_coord_groups
+            self.pre_sampled_value_groups = pre_sampled_value_groups
+        else:
+            # the case that geometry loss is not enabled
+            self.pre_sampled_coord_groups = [torch.empty(0) for _ in range(n_instances)]
+            self.pre_sampled_value_groups = [torch.empty(0) for _ in range(n_instances)]    
         self.pre_sampled_batch_size = 2**12
+        
         # self.pre_cal_GT_images = pre_cal_GT_images
         # HACK: try get less GT images for initial training
-        n_GT_imgs = 2
-        self.pre_cal_GT_images = [pre_cal_GT_images[idx][:n_GT_imgs] for idx in range(n_instances)]
+        if pre_cal_GT_images is not None:
+            n_GT_imgs = 2
+            self.pre_cal_GT_images = [pre_cal_GT_images[idx][:n_GT_imgs] for idx in range(n_instances)]
+        else:
+            # the case that rendering loss is not enabled
+            self.pre_cal_GT_images = [torch.empty(0) for _ in range(n_instances)]
 
     def __getitem__(self, index):
         pre_sampled_coord = self.pre_sampled_coord_groups[index]
-        selected_sampled_indices = torch.randint(0, pre_sampled_coord.shape[0], (self.pre_sampled_batch_size,), device=pre_sampled_coord.device)
-        return self.siren_weights[index].flatten(), self.cond_inputs[index], self.pre_sampled_coord_groups[index][selected_sampled_indices], self.pre_sampled_value_groups[index][selected_sampled_indices], self.pre_cal_GT_images[index]
+        if pre_sampled_coord.numel() > 0:
+            selected_sampled_indices = torch.randint(0, pre_sampled_coord.shape[0], (self.pre_sampled_batch_size,), device=pre_sampled_coord.device)
+            coords = self.pre_sampled_coord_groups[index][selected_sampled_indices]
+            values = self.pre_sampled_value_groups[index][selected_sampled_indices]
+        else
+            # the case that geometry loss is not enabled
+            coords = pre_sampled_coord                          # empty (0)
+            values = self.pre_sampled_value_groups[index]       # empty (0)
+        return self.siren_weights[index].flatten(), self.cond_inputs[index], coords, values, self.pre_cal_GT_images[index]
 
     def __len__(self):
         return self.n_params

@@ -836,8 +836,15 @@ class GaussianDiffusion:
             # geometry_loss_evaluator.load_params_to_siren_model(model_output)
             # terms["geometry_loss"] = geometry_loss_evaluator.evaluate_geometry_loss(additional_args["pre_sampled_coord_groups"], additional_args["pre_sampled_value_groups"])
             # NOTE: consolidate two old functions related to geometry loss evaluation into one
-            terms["geometry_loss"] = geometry_loss_evaluator.evaluate_geometry_loss(model_output, additional_args["pre_sampled_coord_groups"], additional_args["pre_sampled_value_groups"])
-            terms["rendering_loss"] = rendering_loss_evaluator.evaluate_rendering_loss(model_output, additional_args["pre_cal_GT_images"])
+            if geometry_loss_evaluator is not None:
+                terms["geometry_loss"] = geometry_loss_evaluator.evaluate_geometry_loss(model_output, additional_args["pre_sampled_coord_groups"], additional_args["pre_sampled_value_groups"])
+            else:
+                terms["geometry_loss"] = torch.tensor(0.0, device=target.device)
+            
+            if rendering_loss_evaluator is not None:
+                terms["rendering_loss"] = rendering_loss_evaluator.evaluate_rendering_loss(model_output, additional_args["pre_cal_GT_images"])
+            else:
+                terms["rendering_loss"] = torch.tensor(0.0, device=target.device)
             ### section end
             
 

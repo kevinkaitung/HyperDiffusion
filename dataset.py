@@ -298,7 +298,9 @@ class LatentEncodingWeightDataset(Dataset):
     
 class SirenWeightDataset(Dataset):
     def __init__(
-        self, siren_weights, cond_inputs, model_dims, cfg, standardize=False, pre_sampled_coord_groups=None, pre_sampled_value_groups=None
+        self, siren_weights, cond_inputs, model_dims, cfg, standardize=False,
+        pre_sampled_coord_groups=None, pre_sampled_value_groups=None,
+        pre_cal_GT_images=None
     ):
         # receive the siren_weights as loaded_model['net_state_dict'],
         # which has the keys and values
@@ -372,11 +374,15 @@ class SirenWeightDataset(Dataset):
         self.pre_sampled_coord_groups = pre_sampled_coord_groups
         self.pre_sampled_value_groups = pre_sampled_value_groups
         self.pre_sampled_batch_size = 2**12
+        # self.pre_cal_GT_images = pre_cal_GT_images
+        # HACK: try get less GT images for initial training
+        n_GT_imgs = 2
+        self.pre_cal_GT_images = [pre_cal_GT_images[idx][:n_GT_imgs] for idx in range(n_instances)]
 
     def __getitem__(self, index):
         pre_sampled_coord = self.pre_sampled_coord_groups[index]
         selected_sampled_indices = torch.randint(0, pre_sampled_coord.shape[0], (self.pre_sampled_batch_size,), device=pre_sampled_coord.device)
-        return self.siren_weights[index].flatten(), self.cond_inputs[index], self.pre_sampled_coord_groups[index][selected_sampled_indices], self.pre_sampled_value_groups[index][selected_sampled_indices]
+        return self.siren_weights[index].flatten(), self.cond_inputs[index], self.pre_sampled_coord_groups[index][selected_sampled_indices], self.pre_sampled_value_groups[index][selected_sampled_indices], self.pre_cal_GT_images[index]
 
     def __len__(self):
         return self.n_params

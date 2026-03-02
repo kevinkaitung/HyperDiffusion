@@ -24,6 +24,7 @@ if current_dir not in sys.path:
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 from assess_geometry_loss import GeometryLossEvaluator
+from assess_rendering_loss import RenderingLossEvaluator
 
 
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
@@ -761,7 +762,8 @@ class GaussianDiffusion:
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
     def training_losses(
-        self, model, x_start, t, mlp_kwargs, wandb_logger, model_kwargs=None, noise=None, additional_args=None, geometry_loss_evaluator:GeometryLossEvaluator=None
+        self, model, x_start, t, mlp_kwargs, wandb_logger, model_kwargs=None, noise=None, additional_args=None,
+        geometry_loss_evaluator:GeometryLossEvaluator=None, rendering_loss_evaluator:RenderingLossEvaluator=None
     ):
         """
         Compute training losses for a single timestep.
@@ -835,6 +837,7 @@ class GaussianDiffusion:
             # terms["geometry_loss"] = geometry_loss_evaluator.evaluate_geometry_loss(additional_args["pre_sampled_coord_groups"], additional_args["pre_sampled_value_groups"])
             # NOTE: consolidate two old functions related to geometry loss evaluation into one
             terms["geometry_loss"] = geometry_loss_evaluator.evaluate_geometry_loss(model_output, additional_args["pre_sampled_coord_groups"], additional_args["pre_sampled_value_groups"])
+            terms["rendering_loss"] = rendering_loss_evaluator.evaluate_rendering_loss(model_output, additional_args["pre_cal_GT_images"])
             ### section end
             
 
@@ -848,9 +851,9 @@ class GaussianDiffusion:
             terms["cos_sim_mean"] = torch.nn.functional.cosine_similarity(target, model_output, dim=1)
 
             if "vb" in terms:
-                terms["loss"] = terms["mse"] + terms["vb"] + terms["geometry_loss"]
+                terms["loss"] = terms["mse"] + terms["vb"] + terms["geometry_loss"] + terms["rendering_loss"]
             else:
-                terms["loss"] = terms["mse"] + terms["geometry_loss"]
+                terms["loss"] = terms["mse"] + terms["geometry_loss"] + terms["rendering_loss"]
         else:
             raise NotImplementedError(self.loss_type)
 

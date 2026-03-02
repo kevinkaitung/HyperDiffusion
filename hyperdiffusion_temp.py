@@ -16,7 +16,8 @@ import matplotlib.pyplot as plt
 
 class HyperDiffusion(pl.LightningModule):
     def __init__(
-        self, model, train_dt, val_dt, test_dt, mlp_kwargs, image_shape, method, cfg, run_dir, geometry_loss_evaluator
+        self, model, train_dt, val_dt, test_dt, mlp_kwargs, image_shape, method, cfg, run_dir,
+        geometry_loss_evaluator, rendering_loss_evaluator
     ):
         super().__init__()
         self.model = model
@@ -65,6 +66,7 @@ class HyperDiffusion(pl.LightningModule):
         self.cond_input_for_test = all_train_set_cond_inputs[self.selected_idx_for_test]
         
         self.geometry_loss_evaluator = geometry_loss_evaluator
+        self.rendering_loss_evaluator = rendering_loss_evaluator
         self.condition_type = cfg.transformer_config.params.condition
 
     def forward(self, images, cond_input):
@@ -98,6 +100,7 @@ class HyperDiffusion(pl.LightningModule):
             print("Conditional inputs shape:", input_data[1].shape)
             print("Presampled coords shape:", input_data[2].shape)
             print("Presampled values shape:", input_data[3].shape)
+            print("Precalculated GT images shape:", input_data[4].shape)
         
         # Output statistics every 100 step
         if self.trainer.global_step % 100 == 0:
@@ -122,7 +125,8 @@ class HyperDiffusion(pl.LightningModule):
         }
         additional_args = {
             "pre_sampled_coord_groups": input_data[2],
-            "pre_sampled_value_groups": input_data[3]
+            "pre_sampled_value_groups": input_data[3],
+            "pre_cal_GT_images": input_data[4]
         }
         # Execute a diffusion forward pass
         loss_terms = self.diff.training_losses(
@@ -133,7 +137,8 @@ class HyperDiffusion(pl.LightningModule):
             self.logger,
             model_kwargs=model_kwargs,
             additional_args=additional_args,
-            geometry_loss_evaluator=self.geometry_loss_evaluator
+            geometry_loss_evaluator=self.geometry_loss_evaluator,
+            rendering_loss_evaluator=self.rendering_loss_evaluator
         )
         loss_mse = loss_terms["loss"].mean()
         self.log("train_loss", loss_mse)
@@ -142,9 +147,11 @@ class HyperDiffusion(pl.LightningModule):
         if self.trainer.global_step % 100 == 0:
             print("cosine similarity between predicted weights and original weights: ", loss_terms["cos_sim_mean"].mean())
             print("geometry loss: ", loss_terms["geometry_loss"].mean())
+            print("rendering loss: ", loss_terms["rendering_loss"].mean())
             print("mse loss: ", loss_terms["mse"].mean())
         self.log("cosine_similarity", loss_terms["cos_sim_mean"].mean())
         self.log("geometry_loss", loss_terms["geometry_loss"].mean())
+        self.log("rendering_loss", loss_terms["rendering_loss"].mean())
 
         loss = loss_mse
         self.log("epoch_loss", loss, on_step=False, on_epoch=True)
@@ -180,7 +187,7 @@ class HyperDiffusion(pl.LightningModule):
         '''
         PSNR_list = []
         cosine_similarity_list = []
-        for idx, (GT_siren_weight, light_dir, _, _) in enumerate(self.train_dt):
+        for idx, (GT_siren_weight, light_dir, _, _, _) in enumerate(self.train_dt):
             # NOTE: GT_siren_weight should be on CPU, so move to the same device as generate_weight_1_sample
             GT_siren_weight = GT_siren_weight.to(generate_weight_1_sample.device)
             # both 'generate_weight_1_sample' and 'GT_siren_weight' should be flattened SIREN weight of 1 sample (1D tensor)
@@ -222,7 +229,7 @@ class HyperDiffusion(pl.LightningModule):
     
     def calculate_stats_of_train_set_data(self):
         x_0s = []
-        for i, (img, light_dir, _, _) in enumerate(self.train_dt):
+        for i, (img, light_dir, _, _, _) in enumerate(self.train_dt):
             x_0s.append(img)
         x_0s = torch.stack(x_0s).to(self.device)
         flat = x_0s.view(len(x_0s), -1)

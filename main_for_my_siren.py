@@ -1,3 +1,6 @@
+# NOTE: pysampler should be imported before torch
+from assess_rendering_loss import RenderingLossEvaluator
+
 import os
 
 from dataset import SirenWeightDataset, TemporalSirenWeightDataset, TestsetDataset
@@ -95,7 +98,8 @@ def main(cfg: DictConfig):
             cfg,
             standardize=Config.get("standardize"),
             pre_sampled_coord_groups=loaded_model["pre_sampled_coord_groups"],
-            pre_sampled_value_groups=loaded_model["pre_sampled_value_groups"]
+            pre_sampled_value_groups=loaded_model["pre_sampled_value_groups"],
+            pre_cal_GT_images=loaded_model["pre_cal_GT_images"]
         )
     train_dl = DataLoader(
         train_dt,
@@ -108,7 +112,12 @@ def main(cfg: DictConfig):
     )
     
     # TODO: be aware of the batch size passed in (might not work for dist training now)
-    geometry_loss_evaluator = GeometryLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets, Config.get("batch_size"), train_dt.token_means, train_dt.token_stds, Config.get("standardize"))
+    geometry_loss_evaluator = GeometryLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets, train_dt.token_means, train_dt.token_stds, Config.get("standardize"))
+    rendering_loss_evaluator = RenderingLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets,
+                                                      train_dt.token_means, train_dt.token_stds, Config.get("standardize"),
+                                                      loaded_model["camera_configs"], loaded_model["aabb_configs"],
+                                                      loaded_model["march_configs"], Config.get("raw_volume_file_path"),
+                                                      Config.get("tfn_file_path"))
     # normalize with std of all siren weights (just for experiment)
     # cfg.normalization_factor = (1.0 / (train_dt.std)).item()
 
@@ -143,7 +152,8 @@ def main(cfg: DictConfig):
 
     # Initialize HyperDiffusion
     diffuser = HyperDiffusion(
-        model, train_dt, val_dt, test_dt, mlp_kwargs, input_data[0].shape, method, cfg, run_dir, geometry_loss_evaluator
+        model, train_dt, val_dt, test_dt, mlp_kwargs, input_data[0].shape, method, cfg, run_dir,
+        geometry_loss_evaluator, rendering_loss_evaluator
     )
     
     if Config.get("test_set_cond_input_path") is not None:

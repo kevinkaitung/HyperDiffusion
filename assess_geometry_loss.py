@@ -106,7 +106,7 @@ class NeurCompNet(torch.nn.Module):
 # TODO: fix the issue if the training is distributed
 # need to know training batch size on one node first
 class GeometryLossEvaluator:
-    def __init__(self, model_layer_keys, model_layer_shapes, element_offsets, training_batch_size, 
+    def __init__(self, model_layer_keys, model_layer_shapes, element_offsets, 
                  token_means=None, token_stds=None, is_standardized=False):
         #HACK: currently hard code the hyperparameters for NeurCompNet as I only work on this set of config now
         # nets = [

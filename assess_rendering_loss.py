@@ -149,9 +149,9 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             selected_rays_indices = torch.randint(0, self.total_pixels, (self.n_sampled_pixels_for_each_GT_image,))
             
             selected_rays_pts_flat = ray_sampled_pts_flat[selected_rays_indices].to(device) # (n_rays, N, 3)
-            selected_rays_insdie_flat = ray_sampled_pts_inside_flat[selected_rays_indices].to(device) # (n_rays, N)
+            selected_rays_inside_flat = ray_sampled_pts_inside_flat[selected_rays_indices].to(device) # (n_rays, N)
             
-            rendered_batched_rgb = self.ray_march(selected_rays_pts_flat, selected_rays_insdie_flat, cfg, flatten_siren_weights)
+            rendered_batched_rgb = self.ray_march(selected_rays_pts_flat, selected_rays_inside_flat, cfg, flatten_siren_weights)
             # shape of rendered_batched_rgb: # (n_batch, n_rays, 3)
             
             rendering_loss += F.mse_loss(rendered_batched_rgb, pre_rendered_GT_images_flat[:, idx, selected_rays_indices])

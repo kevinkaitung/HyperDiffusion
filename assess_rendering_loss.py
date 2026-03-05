@@ -66,7 +66,21 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             # prepare sampler for scalar value queries
             resolution = tfn_json["dataSource"][0]["dimensions"]
             resolution = [resolution["x"], resolution["y"], resolution["z"]]    
-            self.sampler = create_sampler("structuredRegular", "cuda", dims=resolution, dtype="float32", n_channels=1, filename=raw_data_file_path)
+            # self.sampler = create_sampler("structuredRegular", "cuda", dims=resolution, dtype="float32", n_channels=1, filename=raw_data_file_path)
+            # NOTE: use pure pytorch implementation instead to get rid of sampler dependency
+            # ---- read raw file ----
+            volume_np = np.fromfile(raw_data_file_path, dtype=np.float32)
+            # reshape to 3D
+            volume_np = volume_np.reshape((resolution[2], resolution[1], resolution[0]))
+            # convert to torch tensor
+            volume_tensor = torch.from_numpy(volume_np)
+            # normalize volume to 0~1 with in-place operations to save memory usage            
+            volume_min = volume_tensor.min()
+            volume_max = volume_tensor.max()
+            volume_tensor.sub_(volume_min)
+            volume_tensor.div_(volume_max - volume_min)
+            # create additional dimension for channel (channel dim in this case is 1)
+            volume_tensor = volume_tensor.unsqueeze(-1) # (D, H, W, C)
 
             # tried to pre-generate all sample points beforehand on CPU to save time and GPU memory during training
             # NOTE: might occupy huge amount of CPU memory (i.e., 12GB for 384(H)x384(W)x1024(n_samples))
@@ -105,13 +119,17 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
                 aabb_min = scene_aabb[0].to(device)   # (3,)
                 aabb_max = scene_aabb[1].to(device)   # (3,)
                 
-                pts_norm = (pts - aabb_min) / (aabb_max - aabb_min + 1e-8)   # (H, W, N, 3)
+                pts_coords_norm = (pts - aabb_min) / (aabb_max - aabb_min + 1e-8)   # (H, W, N, 3)
+                pts_values = sample_volume_trilinear(volume_tensor, pts_coords_norm)  # (H, W, N, 1)
                 
                 # -- mask: True for points inside the bounding box [0, 1]^3 --
-                inside_mask = ((pts_norm >= aabb_min) & (pts_norm <= aabb_max)).all(dim=-1)
+                inside_mask = ((pts_coords_norm >= aabb_min) & (pts_coords_norm <= aabb_max)).all(dim=-1)
                 # TODO: probably can be used to filter out those pixels representing the background
                 
-                self.ray_sampled_pts_groups.append(pts_norm)
+                # concatenate sampled pts scalar values after sampled pts coords
+                pts_coords_values = torch.cat([pts_coords_norm, pts_values], dim=-1)
+                
+                self.ray_sampled_pts_groups.append(pts_coords_values)
                 self.ray_sampled_pts_inside_groups.append(inside_mask)
     
     def single_forward(self, params, x):
@@ -142,13 +160,13 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             
             cfg = self.marching_cfg_groups[idx]
             # pre-calculated sampled pts should be on the CPU now
-            ray_sampled_pts_flat = self.ray_sampled_pts_groups[idx].reshape(-1, cfg.n_samples, 3) # (H,W,N,3) -> (H*W,N,3)
+            ray_sampled_pts_flat = self.ray_sampled_pts_groups[idx].reshape(-1, cfg.n_samples, 4) # (H,W,N,4) -> (H*W,N,4)
             ray_sampled_pts_inside_flat = self.ray_sampled_pts_inside_groups[idx].reshape(-1, cfg.n_samples) # (H,W,N) -> (H*W,N)
             
             # randomly select some rays 
             selected_rays_indices = torch.randint(0, self.total_pixels, (self.n_sampled_pixels_for_each_GT_image,))
             
-            selected_rays_pts_flat = ray_sampled_pts_flat[selected_rays_indices].to(device) # (n_rays, N, 3)
+            selected_rays_pts_flat = ray_sampled_pts_flat[selected_rays_indices].to(device) # (n_rays, N, 4)
             selected_rays_inside_flat = ray_sampled_pts_inside_flat[selected_rays_indices].to(device) # (n_rays, N)
             
             rendered_batched_rgb = self.ray_march(selected_rays_pts_flat, selected_rays_inside_flat, cfg, flatten_siren_weights)
@@ -160,28 +178,30 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
     
     def ray_march(
         self,
-        ray_sampled_pts:    torch.Tensor,   # (n_rays, N, 3)
+        ray_sampled_pts:    torch.Tensor,   # (n_rays, N, 4)
         inside_mask:        torch.Tensor,   # (n_rays, N)
         cfg:                MarchConfig,
         flatten_siren_weights: Any,
     ):    
         device = ray_sampled_pts.device
         
-        pts_flat = ray_sampled_pts.reshape(-1, 3)   # (n_rays*N, 3)
+        pts_flat = ray_sampled_pts.reshape(-1, 4)   # (n_rays*N, 4)
         inside_mask = inside_mask.flatten()     # (n_rays*N)
         
-        density_flat = torch.zeros([pts_flat.shape[0], 1], device=device)   # (n_rays*N, 1)
+        # density_flat = torch.zeros([pts_flat.shape[0], 1], device=device)   # (n_rays*N, 1)
+        # decode(self.sampler, pts_flat, density_flat)
         
-        decode(self.sampler, pts_flat, density_flat)
+        density_flat = pts_flat[:, 3:]      # (n_rays*N, 1)
+        
         # batch inference the network as geometry loss eval does
         batched_params = self.build_batched_params(flatten_siren_weights)
         # NOTE: specify in_dims=(0, None) because we use same set of input batch (pts_flat) for all networks
-        batched_shadow_flat = functorch.vmap(self.single_forward, in_dims=(0, None))(batched_params, pts_flat)
+        batched_shadow_flat = functorch.vmap(self.single_forward, in_dims=(0, None))(batched_params, pts_flat[:, :3])
         # batched_shadow_flat: (batch, n_rays*N, 1) -> each network's output would be stack at the first dim
         n_batch = batched_shadow_flat.shape[0]
 
         # zero out any outside points that decode might have affected
-        density_flat[~inside_mask] = 0.0
+        # density_flat[~inside_mask] = 0.0
         batched_shadow_flat[:, ~inside_mask]  = 0.0
         
         # del inside_mask

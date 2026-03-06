@@ -3,6 +3,7 @@ import os
 
 import numpy as np
 import pytorch_lightning as pl
+from lightning.pytorch.utilities import rank_zero_only
 import torch
 # deprecated in newer pytorch lightning
 # from pytorch_lightning.utilities.types import EPOCH_OUTPUT
@@ -95,7 +96,7 @@ class HyperDiffusion(pl.LightningModule):
         # so at this point, the input_data is already on the target device (No need to move manually!)
         input_data = train_batch
         # At the first step output first element in the dataset as a sanit check
-        if self.trainer.global_step == 0:
+        if self.global_rank == 0 and self.trainer.global_step == 0:
             print("Input images shape:", input_data[0].shape)
             print("Conditional inputs shape:", input_data[1].shape)
             print("Presampled coords shape:", input_data[2].shape)
@@ -103,7 +104,7 @@ class HyperDiffusion(pl.LightningModule):
             print("Precalculated GT images shape:", input_data[4].shape)
         
         # Output statistics every 100 step
-        if self.trainer.global_step % 100 == 0:
+        if self.global_rank == 0 and self.trainer.global_step % 100 == 0:
             print(input_data[0].shape)
             print(
                 "Orig weights[0].stats",
@@ -141,26 +142,24 @@ class HyperDiffusion(pl.LightningModule):
             rendering_loss_evaluator=self.rendering_loss_evaluator
         )
         loss_mse = loss_terms["loss"].mean()
-        self.log("train_loss", loss_mse)
-        self.log("mse_loss", loss_terms["mse"].mean())
+        self.log("train_loss", loss_mse, sync_dist=True, on_step=True, on_epoch=False)
+        self.log("mse_loss", loss_terms["mse"].mean(), sync_dist=True, on_step=True, on_epoch=False)
         # Output cosine similarity every 100 step
-        if self.trainer.global_step % 100 == 0:
+        if self.global_rank == 0 and self.trainer.global_step % 100 == 0:
             print("cosine similarity between predicted weights and original weights: ", loss_terms["cos_sim_mean"].mean())
             print("geometry loss: ", loss_terms["geometry_loss"].mean())
             print("rendering loss: ", loss_terms["rendering_loss"].mean())
             print("mse loss: ", loss_terms["mse"].mean())
-        self.log("cosine_similarity", loss_terms["cos_sim_mean"].mean())
-        self.log("geometry_loss", loss_terms["geometry_loss"].mean())
-        self.log("rendering_loss", loss_terms["rendering_loss"].mean())
+        self.log("cosine_similarity", loss_terms["cos_sim_mean"].mean(), sync_dist=True, on_step=True, on_epoch=False)
+        self.log("geometry_loss", loss_terms["geometry_loss"].mean(), sync_dist=True, on_step=True, on_epoch=False)
+        self.log("rendering_loss", loss_terms["rendering_loss"].mean(), sync_dist=True, on_step=True, on_epoch=False)
 
         loss = loss_mse
-        self.log("epoch_loss", loss, on_step=False, on_epoch=True)
+        self.log("epoch_loss", loss, sync_dist=True, on_step=False, on_epoch=True)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
-        mean_PSNR, mean_cosine_similarity = self.generate_samples(self.num_samples_for_val, self.noise_for_val, self.cond_input_for_val, False)
-        self.log("val/PSNR", mean_PSNR)
-        self.log("val/cosine_similarity", mean_cosine_similarity)
+        self.generate_samples(self.num_samples_for_val, self.noise_for_val, self.cond_input_for_val, False)
     
     # deprecated in newer pytorch lightning
     # def training_epoch_end(self, outputs: EPOCH_OUTPUT) -> None:
@@ -181,6 +180,7 @@ class HyperDiffusion(pl.LightningModule):
 
     
     # only calculate 1 sample
+    @rank_zero_only
     def cal_and_plot_cosine_similarity_against_gt(self, generate_weight_1_sample, is_test=False):
         '''
         generate_weight_1_sample: 1D tensor (length: length of the all siren weights in one sample)
@@ -221,12 +221,15 @@ class HyperDiffusion(pl.LightningModule):
         plt.savefig(os.path.join(self.run_dir, save_name))
         plt.close()
         
-        return np.mean(PSNR_list), np.mean(cosine_similarity_list)
+        # HACK: might no need this anymore
+        # and should not return values in @rank_zero_only
+        # return np.mean(PSNR_list), np.mean(cosine_similarity_list)
         
     def evaluate_recon_volume_quality(self):
         # TODO: decode the volume with gen samples
         return
     
+    @rank_zero_only
     def calculate_stats_of_train_set_data(self):
         x_0s = []
         for i, (img, light_dir, _, _, _) in enumerate(self.train_dt):
@@ -299,8 +302,16 @@ class HyperDiffusion(pl.LightningModule):
         out_pc_imgs = []
         
         # only use the first sample to plot cosine similarity evaluation
-        mean_PSNR, mean_cosine_similarity = self.cal_and_plot_cosine_similarity_against_gt(x_0s[0], is_test)
+        self.cal_and_plot_cosine_similarity_against_gt(x_0s[0], is_test)
         
+        self.save_generated_samples_result(x_0s, cond_input, is_test)
+        
+
+    # NOTE: currently only let rank zero do saving file task
+    # for validation_step: every rank simultaneously operates on validation data (same for every rank), but only rank 0 save the results
+    # for test_step: only single rank would be used to do operations and save the results
+    @rank_zero_only
+    def save_generated_samples_result(self, x_0s, cond_input, is_test):
         # Save generated weights samples to disk
         if is_test:
             # NOTE: it seems newer pytorch lightning (On sophia) would not set current_epoch to epoch in ckpt file
@@ -320,7 +331,7 @@ class HyperDiffusion(pl.LightningModule):
             # HACK: a little bit hacky to access selected_idx_for_val for querying temporal indices
             # see how to improve later
             torch.save({"generated_weights_samples": x_0s, "timesteps": self.train_dt.get_all_temporal_indices()[selected_idx].tolist()}, save_dir)
-        return mean_PSNR, mean_cosine_similarity
+
 
     def test_step(self, test_batch, batch_idx):
         # self.generate_samples(16, noise=self.noise_for_val, cond_input=self.cond_input_for_val, is_test=True)

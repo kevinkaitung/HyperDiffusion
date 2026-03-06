@@ -173,17 +173,20 @@ def main(cfg: DictConfig):
         geometry_loss_evaluator, rendering_loss_evaluator
     )
     
-    if Config.get("test_set_cond_input_path") is not None:
-        test_set_cond_inputs = torch.load(Config.get("test_set_cond_input_path"), map_location="cpu")[cond_inputs_key]
-        # TODO: probably can organize the logic better
-        if cfg.transformer_config.params.condition == "prev_volume_weight":
-            raise NotImplementedError("currently no impl. to receive customed test set cond input of 'prev_volume_weight' conditioning")
-    else:
-        # if test set cond inputs are not provided -> randomly get some from train set
-        test_set_cond_inputs = diffuser.cond_input_for_test
-    test_dl = DataLoader(
-        TestsetDataset(cond_inputs=test_set_cond_inputs), batch_size=Config.get("batch_size"), shuffle=False
-    )
+    # NOTE: let's separate training and testing to avoid handling data saving of multi-ranks
+    # No testing step during the training run
+    if Config.get("mode") == "test":
+        if Config.get("test_set_cond_input_path") is not None:
+            test_set_cond_inputs = torch.load(Config.get("test_set_cond_input_path"), map_location="cpu")[cond_inputs_key]
+            # TODO: probably can organize the logic better
+            if cfg.transformer_config.params.condition == "prev_volume_weight":
+                raise NotImplementedError("currently no impl. to receive customed test set cond input of 'prev_volume_weight' conditioning")
+        else:
+            # if test set cond inputs are not provided -> randomly get some from train set
+            test_set_cond_inputs = diffuser.cond_input_for_test
+        test_dl = DataLoader(
+            TestsetDataset(cond_inputs=test_set_cond_inputs), batch_size=Config.get("batch_size"), shuffle=False
+        )
 
     # # Specify where to save checkpoints
     # just save under the exp directory
@@ -223,17 +226,16 @@ def main(cfg: DictConfig):
     trainer = pl.Trainer(
         accelerator="gpu",
         max_epochs=Config.get("epochs"),
-        # NOTE: currently distributed training is not fully supported
-        # TODO: tasks to fully support ddp
-        # 1. revise test and validation step to support distributed training
-        # (either let 1 gpu do the test/validation or distribute them to all available gpus)
-        # 2. make sure all tensors used in training, validation, etc. are placed on the proper devices at right time
-        # 3. test the finished pipeline
+        # NOTE: Supporting DDP done. But several things to be noticed:
+        # 1. since I only prepare 16 samples for validation data,
+        # I just let all ranks run on those 16 samples of validation data but only one rank would actually save the data
+        # 2. separate test_step from training run, where testing run would only use 1 GPU to run on test data
+        # 3. but currently still not support test data more than one batch
+        # TODO: make test_step support and run on multiple batches of the test data for later evaluation
+        # (either distributed or non-distributed version)
         # new version of Pytorch Lightning only support ddp (not dp)
-        # strategy="ddp",
-        # devices=torch.cuda.device_count(),
-        # NOTE: use a single GPU for training now
-        devices=1,
+        strategy="ddp",
+        devices=torch.cuda.device_count() if Config.get("mode") == "train" else 1,
         logger=tensorboard_writer,
         default_root_dir=checkpoint_path,
         callbacks=[
@@ -248,12 +250,15 @@ def main(cfg: DictConfig):
     if Config.get("mode") == "train":
         # If model_resume_path is provided (i.e., not None), the training will continue from that checkpoint
         trainer.fit(diffuser, train_dl, val_dl, ckpt_path=model_resume_path)
-    # best_model_save_path is the path to saved best model
-    trainer.test(
-        diffuser,
-        test_dl,
-        ckpt_path=best_model_save_path if Config.get("mode") == "test" else periodic_checkpoint.last_model_path,
-    )
+    elif Config.get("mode") == "test":
+        # best_model_save_path is the path to saved best model
+        trainer.test(
+            diffuser,
+            test_dl,
+            # NOTE: let's separate training and testing to avoid handling data saving of multi-ranks 
+            # ckpt_path=best_model_save_path if Config.get("mode") == "test" else periodic_checkpoint.last_model_path,
+            ckpt_path=best_model_save_path,
+        )
 
 
 if __name__ == "__main__":

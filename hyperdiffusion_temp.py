@@ -3,7 +3,13 @@ import os
 
 import numpy as np
 import pytorch_lightning as pl
-from lightning.pytorch.utilities import rank_zero_only
+# HACK: workaround to different pytorch lightning version on sophia and polaris
+try:
+    # polaris
+    from lightning.pytorch.utilities import rank_zero_only
+except ImportError:
+    # sophia
+    from pytorch_lightning.utilities import rank_zero_only
 import torch
 # deprecated in newer pytorch lightning
 # from pytorch_lightning.utilities.types import EPOCH_OUTPUT

@@ -383,7 +383,7 @@ class SirenWeightDataset(Dataset):
         # self.pre_cal_GT_images = pre_cal_GT_images
         # HACK: try get less GT images for initial training
         if pre_cal_GT_images is not None:
-            n_GT_imgs = 2
+            n_GT_imgs = cfg.num_GT_imgs_used
             self.pre_cal_GT_images = [pre_cal_GT_images[idx][:n_GT_imgs] for idx in range(n_instances)]
         else:
             # the case that rendering loss is not enabled

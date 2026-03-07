@@ -131,7 +131,7 @@ def main(cfg: DictConfig):
                                                       train_dt.token_means, train_dt.token_stds, Config.get("standardize"),
                                                       loaded_model["camera_configs"], loaded_model["aabb_configs"],
                                                       loaded_model["march_configs"], Config.get("raw_volume_file_path"),
-                                                      Config.get("tfn_file_path"))
+                                                      Config.get("tfn_file_path"), cfg)
     else:
         rendering_loss_evaluator = None
     

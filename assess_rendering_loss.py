@@ -25,7 +25,7 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
     def __init__(self, model_layer_keys, model_layer_shapes, element_offsets, 
                  token_means=None, token_stds=None, is_standardized=False, 
                  camera_configs=None, aabb_configs=None, march_configs=None,
-                 raw_data_file_path=None, tfn_file_path=None):
+                 raw_data_file_path=None, tfn_file_path=None, training_cfg=None):
         super().__init__(model_layer_keys, model_layer_shapes, element_offsets,
                          token_means, token_stds, is_standardized)
         
@@ -34,7 +34,7 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
         # NOTE: set the #viewing angles here
         # self.n_viewing_angles = len(camera_configs)
         # HACK: try less viewing angles first
-        self.n_viewing_angles = 2
+        self.n_viewing_angles = training_cfg.num_GT_imgs_used
         
         # None of the tensor created here would require gradient
         # set no grad to save memory
@@ -58,7 +58,7 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             opacityControl = tfn_json["view"]["volume"]["transferFunction"]["opacityControl"]
             self.tfn_lut = build_transfer_function(colorControls, opacityControl, lut_size=1024)
             
-            self.n_sampled_pixels_for_each_GT_image = 128
+            self.n_sampled_pixels_for_each_GT_image = training_cfg.num_pixels_sampled_per_img
             self.image_height = ray_origins.shape[0]
             self.image_width = ray_origins.shape[1]
             self.total_pixels = self.image_height * self.image_width

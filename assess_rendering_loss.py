@@ -66,21 +66,23 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             # prepare sampler for scalar value queries
             resolution = tfn_json["dataSource"][0]["dimensions"]
             resolution = [resolution["x"], resolution["y"], resolution["z"]]    
-            # self.sampler = create_sampler("structuredRegular", "cuda", dims=resolution, dtype="float32", n_channels=1, filename=raw_data_file_path)
-            # NOTE: use pure pytorch implementation instead to get rid of sampler dependency
-            # ---- read raw file ----
-            volume_np = np.fromfile(raw_data_file_path, dtype=np.float32)
-            # reshape to 3D
-            volume_np = volume_np.reshape((resolution[2], resolution[1], resolution[0]))
-            # convert to torch tensor
-            volume_tensor = torch.from_numpy(volume_np)
-            # normalize volume to 0~1 with in-place operations to save memory usage            
-            volume_min = volume_tensor.min()
-            volume_max = volume_tensor.max()
-            volume_tensor.sub_(volume_min)
-            volume_tensor.div_(volume_max - volume_min)
-            # create additional dimension for channel (channel dim in this case is 1)
-            volume_tensor = volume_tensor.unsqueeze(-1) # (D, H, W, C)
+            # TODO: need to see how to scale this to multiple ranks
+            # or just pre-calculate and store scalar values in ckpt file
+            self.sampler = create_sampler("structuredRegular", "cuda", dims=resolution, dtype="float32", n_channels=1, filename=raw_data_file_path)
+            # # NOTE: use pure pytorch implementation instead to get rid of sampler dependency
+            # # ---- read raw file ----
+            # volume_np = np.fromfile(raw_data_file_path, dtype=np.float32)
+            # # reshape to 3D
+            # volume_np = volume_np.reshape((resolution[2], resolution[1], resolution[0]))
+            # # convert to torch tensor
+            # volume_tensor = torch.from_numpy(volume_np)
+            # # normalize volume to 0~1 with in-place operations to save memory usage            
+            # volume_min = volume_tensor.min()
+            # volume_max = volume_tensor.max()
+            # volume_tensor.sub_(volume_min)
+            # volume_tensor.div_(volume_max - volume_min)
+            # # create additional dimension for channel (channel dim in this case is 1)
+            # volume_tensor = volume_tensor.unsqueeze(-1) # (D, H, W, C)
 
             # tried to pre-generate all sample points beforehand on CPU to save time and GPU memory during training
             # NOTE: might occupy huge amount of CPU memory (i.e., 12GB for 384(H)x384(W)x1024(n_samples))
@@ -120,11 +122,17 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
                 aabb_max = scene_aabb[1].to(device)   # (3,)
                 
                 pts_coords_norm = (pts - aabb_min) / (aabb_max - aabb_min + 1e-8)   # (H, W, N, 3)
-                pts_values = sample_volume_trilinear(volume_tensor, pts_coords_norm)  # (H, W, N, 1)
+                # pts_values = sample_volume_trilinear(volume_tensor, pts_coords_norm)  # (H, W, N, 1)
+                pts_coords_norm = pts_coords_norm.reshape(-1, 3).to("cuda")
+                pts_values = torch.zeros([pts_coords_norm.shape[0], 1], device="cuda", dtype=torch.float32)
+                decode(self.sampler, pts_coords_norm, pts_values)
+                pts_coords_norm = pts_coords_norm.reshape(H, W, cfg.n_samples, 3).to("cpu")
+                pts_values = pts_values.reshape(H, W, cfg.n_samples, 1).to("cpu")
                 
                 # -- mask: True for points inside the bounding box [0, 1]^3 --
                 inside_mask = ((pts_coords_norm >= aabb_min) & (pts_coords_norm <= aabb_max)).all(dim=-1)
                 # TODO: probably can be used to filter out those pixels representing the background
+                pts_values[~inside_mask] = 0.0
                 
                 # concatenate sampled pts scalar values after sampled pts coords
                 pts_coords_values = torch.cat([pts_coords_norm, pts_values], dim=-1)

@@ -234,8 +234,9 @@ def main(cfg: DictConfig):
         # TODO: make test_step support and run on multiple batches of the test data for later evaluation
         # (either distributed or non-distributed version)
         # new version of Pytorch Lightning only support ddp (not dp)
-        strategy="ddp",
-        devices=torch.cuda.device_count() if Config.get("mode") == "train" else 1,
+        # strategy="ddp",
+        # devices=torch.cuda.device_count() if Config.get("mode") == "train" else 1,
+        devices=1,
         logger=tensorboard_writer,
         default_root_dir=checkpoint_path,
         callbacks=[

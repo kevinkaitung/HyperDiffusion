@@ -132,7 +132,8 @@ def main(cfg: DictConfig):
                                                       loaded_model["camera_configs"], loaded_model["aabb_configs"],
                                                       loaded_model["march_configs"], Config.get("raw_volume_file_path"),
                                                       Config.get("tfn_file_path"), cfg,
-                                                      loaded_model["pts_coords_values_group"], loaded_model["inside_mask_group"])
+                                                      loaded_model["pts_coords_values_group"], loaded_model["inside_mask_group"],
+                                                      pre_cal_GT_images)
     else:
         rendering_loss_evaluator = None
     

@@ -26,7 +26,8 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
                  token_means=None, token_stds=None, is_standardized=False, 
                  camera_configs=None, aabb_configs=None, march_configs=None,
                  raw_data_file_path=None, tfn_file_path=None, training_cfg=None,
-                 pts_coords_values_group=None, inside_mask_group=None):
+                 pts_coords_values_group=None, inside_mask_group=None,
+                 pre_cal_GT_images=None):
         super().__init__(model_layer_keys, model_layer_shapes, element_offsets,
                          token_means, token_stds, is_standardized)
         
@@ -91,10 +92,24 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             # # create additional dimension for channel (channel dim in this case is 1)
             # volume_tensor = volume_tensor.unsqueeze(-1) # (D, H, W, C)
 
+            # calculate the foreground mask of GT images
+            # which will be used to sample pixels actually containing the volume content
+            self.foreground_mask_groups = []
+            self.ray_sampled_pts_groups = []
+            self.ray_sampled_pts_inside_groups = []
+            for idx in range(self.n_viewing_angles):
+                # just use the first instance, because colored pixels should be on the same positions across all instances
+                pre_cal_GT_image = pre_cal_GT_images[0][idx] # (H, W, 3)
+                foreground_mask = (pre_cal_GT_image > 0.0001).any(dim=-1) # (H, W)
+                self.foreground_mask_groups.append(foreground_mask)
+                # only store foreground pixels to save space
+                self.ray_sampled_pts_groups.append(pts_coords_values_group[idx][foreground_mask]) # (n_fg_pixels, n_samples, 4)
+                self.ray_sampled_pts_inside_groups.append(inside_mask_group[idx][foreground_mask]) # (n_fg_pixels, n_samples)
+
             # NOTE: we already pre-calculate all sample points when preparing the GT rendered images
             # direct load those lists of tensors here
-            self.ray_sampled_pts_groups = pts_coords_values_group
-            self.ray_sampled_pts_inside_groups = inside_mask_group
+            # self.ray_sampled_pts_groups = pts_coords_values_group
+            # self.ray_sampled_pts_inside_groups = inside_mask_group
             # tried to pre-generate all sample points beforehand on CPU to save time and GPU memory during training
             # NOTE: might occupy huge amount of CPU memory (i.e., 12GB for 384(H)x384(W)x1024(n_samples))
             # need to think about whether it is still feasible when #viewing angles are large (currently have 20 at most)
@@ -171,7 +186,7 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
         assert N == flatten_siren_weights.shape[0]
         assert V == self.n_viewing_angles, "#rendered GT images doesn't match n_viewing_angles"
         
-        pre_rendered_GT_images_flat = pre_rendered_GT_images.reshape(N, V, -1, 3)
+        # pre_rendered_GT_images_flat = pre_rendered_GT_images.reshape(N, V, -1, 3)
         
         rendering_loss = torch.tensor(0.0).to(device)
         # iterate through every GT images from different camera positions
@@ -179,11 +194,14 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             
             cfg = self.marching_cfg_groups[idx]
             # pre-calculated sampled pts should be on the CPU now
-            ray_sampled_pts_flat = self.ray_sampled_pts_groups[idx].reshape(-1, cfg.n_samples, 4) # (H,W,N,4) -> (H*W,N,4)
-            ray_sampled_pts_inside_flat = self.ray_sampled_pts_inside_groups[idx].reshape(-1, cfg.n_samples) # (H,W,N) -> (H*W,N)
+            # ray_sampled_pts_flat = self.ray_sampled_pts_groups[idx].reshape(-1, cfg.n_samples, 4) # (H,W,N,4) -> (H*W,N,4)
+            # ray_sampled_pts_inside_flat = self.ray_sampled_pts_inside_groups[idx].reshape(-1, cfg.n_samples) # (H,W,N) -> (H*W,N)
+            ray_sampled_pts_flat = self.ray_sampled_pts_groups[idx] # (n_fg_pixels, n_samples, 4)
+            ray_sampled_pts_inside_flat = self.ray_sampled_pts_inside_groups[idx] # (n_fg_pixels, n_samples)
             
             # randomly select some rays 
-            selected_rays_indices = torch.randint(0, self.total_pixels, (self.n_sampled_pixels_for_each_GT_image,))
+            # selected_rays_indices = torch.randint(0, self.total_pixels, (self.n_sampled_pixels_for_each_GT_image,))
+            selected_rays_indices = torch.randint(0, ray_sampled_pts_flat.shape[0], (self.n_sampled_pixels_for_each_GT_image,))
             
             selected_rays_pts_flat = ray_sampled_pts_flat[selected_rays_indices].to(device) # (n_rays, N, 4)
             selected_rays_inside_flat = ray_sampled_pts_inside_flat[selected_rays_indices].to(device) # (n_rays, N)
@@ -191,7 +209,11 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             rendered_batched_rgb = self.ray_march(selected_rays_pts_flat, selected_rays_inside_flat, cfg, flatten_siren_weights)
             # shape of rendered_batched_rgb: # (n_batch, n_rays, 3)
             
-            rendering_loss += F.mse_loss(rendered_batched_rgb, pre_rendered_GT_images_flat[:, idx, selected_rays_indices])
+            foreground_mask = self.foreground_mask_groups[idx] # (H, W)
+            this_view_pre_rendered_GT_images = pre_rendered_GT_images[:, idx] # (N, H, W, 3)
+            this_view_fg_GT_images = this_view_pre_rendered_GT_images[:, foreground_mask] # (N, n_fg_pixels, 3)
+            # rendering_loss += F.mse_loss(rendered_batched_rgb, pre_rendered_GT_images_flat[:, idx, selected_rays_indices])
+            rendering_loss += F.mse_loss(rendered_batched_rgb, this_view_fg_GT_images[:, selected_rays_indices])
         rendering_loss = rendering_loss / self.n_viewing_angles
         return rendering_loss
     

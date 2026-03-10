@@ -131,7 +131,8 @@ def main(cfg: DictConfig):
                                                       train_dt.token_means, train_dt.token_stds, Config.get("standardize"),
                                                       loaded_model["camera_configs"], loaded_model["aabb_configs"],
                                                       loaded_model["march_configs"], Config.get("raw_volume_file_path"),
-                                                      Config.get("tfn_file_path"), cfg)
+                                                      Config.get("tfn_file_path"), cfg,
+                                                      loaded_model["pts_coords_values_group"], loaded_model["inside_mask_group"])
     else:
         rendering_loss_evaluator = None
     
@@ -234,9 +235,9 @@ def main(cfg: DictConfig):
         # TODO: make test_step support and run on multiple batches of the test data for later evaluation
         # (either distributed or non-distributed version)
         # new version of Pytorch Lightning only support ddp (not dp)
-        # strategy="ddp",
-        # devices=torch.cuda.device_count() if Config.get("mode") == "train" else 1,
-        devices=1,
+        strategy="ddp",
+        devices=torch.cuda.device_count() if Config.get("mode") == "train" else 1,
+        # devices=1,
         logger=tensorboard_writer,
         default_root_dir=checkpoint_path,
         callbacks=[

@@ -156,6 +156,7 @@ class HyperDiffusion(pl.LightningModule):
             print("geometry loss: ", loss_terms["geometry_loss"].mean())
             print("rendering loss: ", loss_terms["rendering_loss"].mean())
             print("mse loss: ", loss_terms["mse"].mean())
+            # print(f"max memory allocated: {torch.cuda.max_memory_allocated()}")
         self.log("cosine_similarity", loss_terms["cos_sim_mean"].mean(), sync_dist=True, on_step=True, on_epoch=False)
         self.log("geometry_loss", loss_terms["geometry_loss"].mean(), sync_dist=True, on_step=True, on_epoch=False)
         self.log("rendering_loss", loss_terms["rendering_loss"].mean(), sync_dist=True, on_step=True, on_epoch=False)

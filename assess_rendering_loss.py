@@ -25,7 +25,8 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
     def __init__(self, model_layer_keys, model_layer_shapes, element_offsets, 
                  token_means=None, token_stds=None, is_standardized=False, 
                  camera_configs=None, aabb_configs=None, march_configs=None,
-                 raw_data_file_path=None, tfn_file_path=None, training_cfg=None):
+                 raw_data_file_path=None, tfn_file_path=None, training_cfg=None,
+                 pts_coords_values_group=None, inside_mask_group=None):
         super().__init__(model_layer_keys, model_layer_shapes, element_offsets,
                          token_means, token_stds, is_standardized)
         
@@ -39,13 +40,15 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
         # None of the tensor created here would require gradient
         # set no grad to save memory
         with torch.no_grad():
-            # prepare ray origins and ray directions of all viewing angles (place on cpu first, move to gpu during training)
-            self.ray_origins_groups = []
-            self.ray_directions_groups = []
-            for idx in range(self.n_viewing_angles):
-                ray_origins, ray_directions = generate_rays(camera=Camera(**camera_configs[idx]), device="cpu")
-                self.ray_origins_groups.append(ray_origins)
-                self.ray_directions_groups.append(ray_directions)
+            # NOTE: we pre-calculate and store all sample points when preparing the GT rendered images
+            # no need to calculare ray origins and ray dirs here
+            # # prepare ray origins and ray directions of all viewing angles (place on cpu first, move to gpu during training)
+            # self.ray_origins_groups = []
+            # self.ray_directions_groups = []
+            # for idx in range(self.n_viewing_angles):
+            #     ray_origins, ray_directions = generate_rays(camera=Camera(**camera_configs[idx]), device="cpu")
+            #     self.ray_origins_groups.append(ray_origins)
+            #     self.ray_directions_groups.append(ray_directions)
             
             # prepare marching cfg and scene BB
             self.marching_cfg_groups = [MarchConfig(**march_configs[idx]) for idx in range(self.n_viewing_angles)]
@@ -59,16 +62,20 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             self.tfn_lut = build_transfer_function(colorControls, opacityControl, lut_size=1024)
             
             self.n_sampled_pixels_for_each_GT_image = training_cfg.num_pixels_sampled_per_img
-            self.image_height = ray_origins.shape[0]
-            self.image_width = ray_origins.shape[1]
+            # self.image_height = ray_origins.shape[0]
+            # self.image_width = ray_origins.shape[1]
+            # NOTE: all images should have the same resolution, so pick the first image's camera config to get the resolution
+            camera=Camera(**camera_configs[0])
+            self.image_height = camera.height
+            self.image_width = camera.width
             self.total_pixels = self.image_height * self.image_width
             
             # prepare sampler for scalar value queries
             resolution = tfn_json["dataSource"][0]["dimensions"]
             resolution = [resolution["x"], resolution["y"], resolution["z"]]    
-            # TODO: need to see how to scale this to multiple ranks
-            # or just pre-calculate and store scalar values in ckpt file
-            self.sampler = create_sampler("structuredRegular", "cuda", dims=resolution, dtype="float32", n_channels=1, filename=raw_data_file_path)
+            # NOTE: we pre-calculate and store all sample points when preparing the GT rendered images
+            # no need to prepare sampler or raw volume here
+            # self.sampler = create_sampler("structuredRegular", "cuda", dims=resolution, dtype="float32", n_channels=1, filename=raw_data_file_path)
             # # NOTE: use pure pytorch implementation instead to get rid of sampler dependency
             # # ---- read raw file ----
             # volume_np = np.fromfile(raw_data_file_path, dtype=np.float32)
@@ -84,61 +91,65 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             # # create additional dimension for channel (channel dim in this case is 1)
             # volume_tensor = volume_tensor.unsqueeze(-1) # (D, H, W, C)
 
+            # NOTE: we already pre-calculate all sample points when preparing the GT rendered images
+            # direct load those lists of tensors here
+            self.ray_sampled_pts_groups = pts_coords_values_group
+            self.ray_sampled_pts_inside_groups = inside_mask_group
             # tried to pre-generate all sample points beforehand on CPU to save time and GPU memory during training
             # NOTE: might occupy huge amount of CPU memory (i.e., 12GB for 384(H)x384(W)x1024(n_samples))
             # need to think about whether it is still feasible when #viewing angles are large (currently have 20 at most)
             # luckily, the size won't grow when #shadow_instances increase
-            self.ray_sampled_pts_groups = []
-            self.ray_sampled_pts_inside_groups = []
-            for idx in range(self.n_viewing_angles):
-                # get the corresponding parameters for this viewing angle
-                ray_origins = self.ray_origins_groups[idx]
-                ray_directions = self.ray_directions_groups[idx]
-                cfg = self.marching_cfg_groups[idx]
-                scene_aabb = self.scene_aabb_groups[idx]
+            # self.ray_sampled_pts_groups = []
+            # self.ray_sampled_pts_inside_groups = []
+            # for idx in range(self.n_viewing_angles):
+            #     # get the corresponding parameters for this viewing angle
+            #     ray_origins = self.ray_origins_groups[idx]
+            #     ray_directions = self.ray_directions_groups[idx]
+            #     cfg = self.marching_cfg_groups[idx]
+            #     scene_aabb = self.scene_aabb_groups[idx]
                 
-                # NOTE: the operation would operate on CPU
-                # TODO: move to GPU if necessary
-                H, W, _ = ray_origins.shape
-                device = ray_origins.device
+            #     # NOTE: the operation would operate on CPU
+            #     # TODO: move to GPU if necessary
+            #     H, W, _ = ray_origins.shape
+            #     device = ray_origins.device
                 
-                # --- Sample t values along each ray ---
-                t_vals = torch.linspace(cfg.t_near, cfg.t_far, cfg.n_samples, device=device)
-                # Perturb samples slightly (optional, helps reduce banding)
-                if cfg.n_samples > 1:
-                    dt = (cfg.t_far - cfg.t_near) / cfg.n_samples
-                    noise = torch.rand(H, W, cfg.n_samples, device=device) * dt
-                    t_vals = t_vals.unsqueeze(0).unsqueeze(0) + noise   # (H, W, N)
-                else:
-                    t_vals = t_vals.unsqueeze(0).unsqueeze(0).expand(H, W, -1)
+            #     # --- Sample t values along each ray ---
+            #     t_vals = torch.linspace(cfg.t_near, cfg.t_far, cfg.n_samples, device=device)
+            #     # Perturb samples slightly (optional, helps reduce banding)
+            #     if cfg.n_samples > 1:
+            #         dt = (cfg.t_far - cfg.t_near) / cfg.n_samples
+            #         noise = torch.rand(H, W, cfg.n_samples, device=device) * dt
+            #         t_vals = t_vals.unsqueeze(0).unsqueeze(0) + noise   # (H, W, N)
+            #     else:
+            #         t_vals = t_vals.unsqueeze(0).unsqueeze(0).expand(H, W, -1)
 
-                # --- World-space sample positions ---
-                # origins: (H, W, 1, 3),  directions: (H, W, 1, 3),  t: (H, W, N, 1)
-                pts = (ray_origins.unsqueeze(2)
-                    + ray_directions.unsqueeze(2) * t_vals.unsqueeze(-1))  # (H, W, N, 3)
+            #     # --- World-space sample positions ---
+            #     # origins: (H, W, 1, 3),  directions: (H, W, 1, 3),  t: (H, W, N, 1)
+            #     pts = (ray_origins.unsqueeze(2)
+            #         + ray_directions.unsqueeze(2) * t_vals.unsqueeze(-1))  # (H, W, N, 3)
                 
-                # --- Map world coords to [0,1] volume space via AABB ---
-                aabb_min = scene_aabb[0].to(device)   # (3,)
-                aabb_max = scene_aabb[1].to(device)   # (3,)
+            #     # --- Map world coords to [0,1] volume space via AABB ---
+            #     aabb_min = scene_aabb[0].to(device)   # (3,)
+            #     aabb_max = scene_aabb[1].to(device)   # (3,)
                 
-                pts_coords_norm = (pts - aabb_min) / (aabb_max - aabb_min + 1e-8)   # (H, W, N, 3)
-                # pts_values = sample_volume_trilinear(volume_tensor, pts_coords_norm)  # (H, W, N, 1)
-                pts_coords_norm = pts_coords_norm.reshape(-1, 3).to("cuda")
-                pts_values = torch.zeros([pts_coords_norm.shape[0], 1], device="cuda", dtype=torch.float32)
-                decode(self.sampler, pts_coords_norm, pts_values)
-                pts_coords_norm = pts_coords_norm.reshape(H, W, cfg.n_samples, 3).to("cpu")
-                pts_values = pts_values.reshape(H, W, cfg.n_samples, 1).to("cpu")
+            #     pts_coords_norm = (pts - aabb_min) / (aabb_max - aabb_min + 1e-8)   # (H, W, N, 3)
+            #     # pts_values = sample_volume_trilinear(volume_tensor, pts_coords_norm)  # (H, W, N, 1)
+            #     pts_coords_norm = pts_coords_norm.reshape(-1, 3).to("cuda")
+            #     pts_values = torch.zeros([pts_coords_norm.shape[0], 1], device="cuda", dtype=torch.float32)
+            #     decode(self.sampler, pts_coords_norm, pts_values)
+            #     pts_coords_norm = pts_coords_norm.reshape(H, W, cfg.n_samples, 3).to("cpu")
+            #     pts_values = pts_values.reshape(H, W, cfg.n_samples, 1).to("cpu")
                 
-                # -- mask: True for points inside the bounding box [0, 1]^3 --
-                inside_mask = ((pts_coords_norm >= aabb_min) & (pts_coords_norm <= aabb_max)).all(dim=-1)
-                # TODO: probably can be used to filter out those pixels representing the background
-                pts_values[~inside_mask] = 0.0
+            #     # -- mask: True for points inside the bounding box [0, 1]^3 --
+            #     inside_mask = ((pts_coords_norm >= aabb_min) & (pts_coords_norm <= aabb_max)).all(dim=-1)
+            #     # TODO: probably can be used to filter out those pixels representing the background
+            #     pts_values[~inside_mask] = 0.0
                 
-                # concatenate sampled pts scalar values after sampled pts coords
-                pts_coords_values = torch.cat([pts_coords_norm, pts_values], dim=-1)
+            #     # concatenate sampled pts scalar values after sampled pts coords
+            #     pts_coords_values = torch.cat([pts_coords_norm, pts_values], dim=-1)
                 
-                self.ray_sampled_pts_groups.append(pts_coords_values)
-                self.ray_sampled_pts_inside_groups.append(inside_mask)
+            #     self.ray_sampled_pts_groups.append(pts_coords_values)
+            #     self.ray_sampled_pts_inside_groups.append(inside_mask)
     
     def single_forward(self, params, x):
         return torch.nn.utils.stateless.functional_call(self.net_template, params, x)

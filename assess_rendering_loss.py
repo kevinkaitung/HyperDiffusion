@@ -27,7 +27,7 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
                  camera_configs=None, aabb_configs=None, march_configs=None,
                  raw_data_file_path=None, tfn_file_path=None, training_cfg=None,
                  pts_coords_values_group=None, inside_mask_group=None,
-                 pre_cal_GT_images=None):
+                 pre_cal_GT_images=None, enable_foreground_mask=False):
         super().__init__(model_layer_keys, model_layer_shapes, element_offsets,
                          token_means, token_stds, is_standardized)
         
@@ -97,10 +97,14 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             self.foreground_mask_groups = []
             self.ray_sampled_pts_groups = []
             self.ray_sampled_pts_inside_groups = []
+            if enable_foreground_mask:
+                foreground_mask_threshold = 0.0001
+            else:
+                foreground_mask_threshold = -1.0
             for idx in range(self.n_viewing_angles):
                 # just use the first instance, because colored pixels should be on the same positions across all instances
                 pre_cal_GT_image = pre_cal_GT_images[0][idx] # (H, W, 3)
-                foreground_mask = (pre_cal_GT_image > 0.0001).any(dim=-1) # (H, W)
+                foreground_mask = (pre_cal_GT_image > foreground_mask_threshold).any(dim=-1) # (H, W)
                 self.foreground_mask_groups.append(foreground_mask)
                 # only store foreground pixels to save space
                 self.ray_sampled_pts_groups.append(pts_coords_values_group[idx][foreground_mask]) # (n_fg_pixels, n_samples, 4)

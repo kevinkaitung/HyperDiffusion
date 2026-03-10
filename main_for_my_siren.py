@@ -133,7 +133,7 @@ def main(cfg: DictConfig):
                                                       loaded_model["march_configs"], Config.get("raw_volume_file_path"),
                                                       Config.get("tfn_file_path"), cfg,
                                                       loaded_model["pts_coords_values_group"], loaded_model["inside_mask_group"],
-                                                      pre_cal_GT_images)
+                                                      pre_cal_GT_images, Config.get("enable_fg_mask_GT_imgs"))
     else:
         rendering_loss_evaluator = None
     

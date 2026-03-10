@@ -30,6 +30,7 @@ siren_path: /home/kctung/Projects/BlockFusion/logs/SIREN_overfitting_mechhand/20
 raw_volume_file_path: /grand/insitu/kctung/datasets/zea_c_spider2_957x1195x1003_float32.raw
 tfn_file_path: /grand/insitu/kctung/datasets/scene_spider_transparent_pink.json
 enable_rendering_loss: True
+enable_fg_mask_GT_imgs: False
 num_GT_imgs_used: 7
 num_pixels_sampled_per_img: 24
 enable_geometry_loss: True

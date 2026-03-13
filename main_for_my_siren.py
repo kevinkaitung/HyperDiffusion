@@ -262,6 +262,7 @@ def main(cfg: DictConfig):
             # ckpt_path=best_model_save_path if Config.get("mode") == "test" else periodic_checkpoint.last_model_path,
             ckpt_path=best_model_save_path,
         )
+    print(f"At the end of the training. Max Memory Allocated: {torch.cuda.max_memory_allocated()} / Max Memory Reserved: {torch.cuda.max_memory_reserved()}")
 
 
 if __name__ == "__main__":

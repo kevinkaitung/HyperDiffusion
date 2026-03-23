@@ -26,6 +26,7 @@ from transformer import Transformer
 
 from temp_exps_helper import calculate_siren_weights_n_parameters
 from assess_geometry_loss import GeometryLossEvaluator
+import json5
 
 @hydra.main(
     version_base=None,
@@ -122,11 +123,12 @@ def main(cfg: DictConfig):
     )
     
     # TODO: be aware of the batch size passed in (might not work for dist training now)
-    if Config.get("enable_geometry_loss"):
+    # only enable it for training mode (disable for test mode for faster inference)
+    if Config.get("enable_geometry_loss") and Config.get("mode") == "train":
         geometry_loss_evaluator = GeometryLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets, train_dt.token_means, train_dt.token_stds, Config.get("standardize"))
     else:
         geometry_loss_evaluator = None
-    if Config.get("enable_rendering_loss"):
+    if Config.get("enable_rendering_loss") and Config.get("mode") == "train":
         rendering_loss_evaluator = RenderingLossEvaluator(train_dt.layer_keys, train_dt.token_shapes, train_dt.token_offsets,
                                                       train_dt.token_means, train_dt.token_stds, Config.get("standardize"),
                                                       loaded_model["camera_configs"], loaded_model["aabb_configs"],
@@ -179,7 +181,9 @@ def main(cfg: DictConfig):
     # No testing step during the training run
     if Config.get("mode") == "test":
         if Config.get("test_set_cond_input_path") is not None:
-            test_set_cond_inputs = torch.load(Config.get("test_set_cond_input_path"), map_location="cpu")[cond_inputs_key]
+            # test_set_cond_inputs = torch.load(Config.get("test_set_cond_input_path"), map_location="cpu")[cond_inputs_key]
+            with open(Config.get("test_set_cond_input_path"), 'r') as f:
+                test_set_cond_inputs = json5.load(f)[cond_inputs_key]
             # TODO: probably can organize the logic better
             if cfg.transformer_config.params.condition == "prev_volume_weight":
                 raise NotImplementedError("currently no impl. to receive customed test set cond input of 'prev_volume_weight' conditioning")
@@ -237,7 +241,7 @@ def main(cfg: DictConfig):
         # (either distributed or non-distributed version)
         # new version of Pytorch Lightning only support ddp (not dp)
         strategy="ddp",
-        devices=torch.cuda.device_count() if Config.get("mode") == "train" else 1,
+        devices=torch.cuda.device_count() if Config.get("mode") == "train" and Config.get("enable_multi_devices_training") == True else 1,
         # devices=1,
         logger=tensorboard_writer,
         default_root_dir=checkpoint_path,
@@ -262,7 +266,7 @@ def main(cfg: DictConfig):
             # ckpt_path=best_model_save_path if Config.get("mode") == "test" else periodic_checkpoint.last_model_path,
             ckpt_path=best_model_save_path,
         )
-    print(f"At the end of the training. Max Memory Allocated: {torch.cuda.max_memory_allocated()} / Max Memory Reserved: {torch.cuda.max_memory_reserved()}")
+    print(f"At the end of the training. Max Memory Allocated: {torch.cuda.max_memory_allocated() / 1024**3} / Max Memory Reserved: {torch.cuda.max_memory_reserved() / 1024**3}")
 
 
 if __name__ == "__main__":

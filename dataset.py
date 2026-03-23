@@ -373,7 +373,11 @@ class SirenWeightDataset(Dataset):
         # prepare the presample points for evaluating geometry loss (each instance should have a set of coords/scalar values pair)
         if (pre_sampled_coord_groups is not None) & (pre_sampled_value_groups is not None):
             self.pre_sampled_coord_groups = pre_sampled_coord_groups
-            self.pre_sampled_value_groups = pre_sampled_value_groups
+            # HACK: to solve if shape mismatches
+            if pre_sampled_value_groups[0].dim() == 2:
+                self.pre_sampled_value_groups = [pre_sampled_value.squeeze(1) for pre_sampled_value in pre_sampled_value_groups]
+            else:
+                self.pre_sampled_value_groups = pre_sampled_value_groups
         else:
             # the case that geometry loss is not enabled
             self.pre_sampled_coord_groups = [torch.empty(0) for _ in range(n_instances)]

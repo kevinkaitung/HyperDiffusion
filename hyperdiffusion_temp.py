@@ -166,7 +166,9 @@ class HyperDiffusion(pl.LightningModule):
         return loss
 
     def validation_step(self, val_batch, batch_idx):
-        self.generate_samples(self.num_samples_for_val, self.noise_for_val, self.cond_input_for_val, False)
+        x_0s, cond_input = self.generate_samples(self.num_samples_for_val, self.noise_for_val, self.cond_input_for_val, False)
+        self.save_generated_samples_result(x_0s, cond_input, False)
+        torch.distributed.barrier()
     
     # deprecated in newer pytorch lightning
     # def training_epoch_end(self, outputs: EPOCH_OUTPUT) -> None:
@@ -311,7 +313,8 @@ class HyperDiffusion(pl.LightningModule):
         # only use the first sample to plot cosine similarity evaluation
         self.cal_and_plot_cosine_similarity_against_gt(x_0s[0], is_test)
         
-        self.save_generated_samples_result(x_0s, cond_input, is_test)
+        return x_0s, cond_input
+        # self.save_generated_samples_result(x_0s, cond_input, is_test)
         
 
     # NOTE: currently only let rank zero do saving file task
@@ -343,4 +346,23 @@ class HyperDiffusion(pl.LightningModule):
     def test_step(self, test_batch, batch_idx):
         # self.generate_samples(16, noise=self.noise_for_val, cond_input=self.cond_input_for_val, is_test=True)
         # TODO: need to revise for the case that multiple batches would be used in test_step
-        self.generate_samples(len(test_batch), cond_input=test_batch, is_test=True)
+        x_0s, cond_input = self.generate_samples(len(test_batch), cond_input=test_batch, is_test=True)
+        # accumulate results across batches
+        if not hasattr(self, '_test_results'):
+            self._test_results = {'x_0s': [], 'cond_inputs': []}
+        self._test_results['x_0s'].append(x_0s.cpu())
+        self._test_results['cond_inputs'].append(cond_input.cpu())
+
+    # NOTE: this callback might not be supported by pytorch lightning ver. 1.x
+    def on_test_epoch_end(self):
+        if not hasattr(self, '_test_results'):
+            return
+        # concatenate all batches
+        all_x_0s = torch.cat(self._test_results['x_0s'], dim=0)  # (total_samples, ...)
+        all_cond_inputs = torch.cat(self._test_results['cond_inputs'], dim=0)  # (total_samples, ...)
+
+        # save everything at once
+        self.save_generated_samples_result(all_x_0s, all_cond_inputs, is_test=True)
+        
+        # cleanup to avoid stale results if test is run multiple times
+        del self._test_results

@@ -34,6 +34,7 @@ enable_fg_mask_GT_imgs: False
 num_GT_imgs_used: 7
 num_pixels_sampled_per_img: 24
 enable_geometry_loss: True
+enable_multi_devices_training: True
 test_set_cond_input_path: 
 # run_dir: # only need for ckpt generated before refactoring log organization
 # mlps_folder_train: ./mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad

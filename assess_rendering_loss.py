@@ -58,9 +58,15 @@ class RenderingLossEvaluator(GeometryLossEvaluator):
             # prepare tfn lookup table
             with open(tfn_file_path, 'r') as f:
                 tfn_json = json5.load(f)
-            colorControls = tfn_json["view"]["volume"]["transferFunction"]["colorControls"]
-            opacityControl = tfn_json["view"]["volume"]["transferFunction"]["opacityControl"]
-            self.tfn_lut = build_transfer_function(colorControls, opacityControl, lut_size=1024)
+            loaded_tfn = tfn_json["view"]["volume"]["transferFunction"]
+            colorControls = loaded_tfn["colorControls"]
+            if "opacityControl" in loaded_tfn:
+                opacityControl = loaded_tfn["opacityControl"]
+                gaussianObjects = None
+            elif "gaussianObjects" in loaded_tfn:
+                opacityControl = None
+                gaussianObjects = loaded_tfn["gaussianObjects"]
+            self.tfn_lut = build_transfer_function(colorControls, opacityControl, gaussianObjects, lut_size=1024)
             
             self.n_sampled_pixels_for_each_GT_image = training_cfg.num_pixels_sampled_per_img
             # self.image_height = ray_origins.shape[0]
